@@ -46,6 +46,22 @@ The optional version endpoint should return only commit, environment, and build 
 the application’s normal routing policy, avoid verbose errors, and never return configuration,
 connection strings, provider IDs, or user data.
 
+## Local Git execution
+
+Local Git observation runs through `GitRunner`, which invokes the `git` executable via `execFile`
+with `shell: false` — arguments are arrays, never interpolated strings, and manifest data is never
+used to build command lines. An allowlist (`assertReadOnlyGitInvocation`) restricts invocations to
+`version`, `rev-parse`, `rev-list`, `status` (safe flags), bare `remote`, `config --get`, read-form
+`symbolic-ref`, and `worktree list`. Mutating subcommands (`fetch`, `push`, `reset`, `checkout`,
+`update-ref`, `config` writes, …) and git-level flags that redirect the repository (`-c`,
+`--git-dir`, `-C`, …) are rejected before spawn.
+
+`GIT_OPTIONAL_LOCKS=0` keeps `status` from writing the index; `GIT_DIR`-style environment overrides
+are stripped; `LC_ALL=C` makes diagnostics deterministic. Observations carry repository-relative
+file paths (capped; counts stay exact), never file contents. Repository root and Git directory
+paths are intentionally absolute — they are the identity of the observation in a local-first
+report that never leaves `.deploytruth/reports/` unless the user copies it.
+
 ## Local UI and storage
 
 The Vite development server is explicitly bound to `127.0.0.1`. Local reports are written only to

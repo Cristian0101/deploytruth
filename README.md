@@ -6,9 +6,9 @@ DeployTruth compares declared deployment topology with provider-normalized obser
 produces deterministic PASS, WARN, or FAIL reports. It is local-first, read-only, and does not
 send telemetry by default.
 
-This repository currently contains the v0.1 foundation: contracts, fixtures, deterministic
-rules, safe reports, a CLI shell, a report-viewer boundary, and CI. Live GitHub, Vercel, and
-Supabase adapters begin in later milestones.
+This repository currently contains the v0.1 foundation plus M1 local Git truth: contracts,
+fixtures, deterministic rules, safe reports, a working `check`/`doctor` CLI, a report-viewer
+boundary, and CI. Live GitHub, Vercel, and Supabase adapters begin in later milestones.
 
 ## Quick start
 
@@ -19,7 +19,15 @@ pnpm lint
 pnpm test
 pnpm build
 node packages/cli/dist/index.js doctor --config deploytruth.example.yml
+# from inside a Git working tree containing deploytruth.yml:
+node packages/cli/dist/index.js check --config deploytruth.yml --environment production
 ```
+
+`check` evaluates real local Git truth (branch, HEAD, working tree, tracking ref, ahead/behind,
+worktrees, in-progress operations) against the declared environment. Deployment, database, and
+runtime providers are not implemented yet, so their evidence is reported as unverified and the
+verdict stays `WARN` — never a false `PASS`. See [docs/git-truth.md](docs/git-truth.md) for what
+local Git truth does and does not prove.
 
 The E2E seam is available as `pnpm test:e2e`; install Playwright Chromium first when running it on
 a new machine: `pnpm exec playwright install chromium`.

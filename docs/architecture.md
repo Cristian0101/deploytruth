@@ -37,13 +37,18 @@ The engine works with three models:
    evidence from adapters.
 3. `TruthReport`: versioned, safe-to-store environment truth, findings, and topology.
 
-| Provider concern              | Normalized field                           |
-| ----------------------------- | ------------------------------------------ |
-| GitHub branch SHA             | `SourceObservation.remoteHeadSha`          |
-| Vercel deployment SHA         | `DeploymentObservation.commitSha`          |
-| Vercel connected database     | `DeploymentObservation.connectedResources` |
-| Supabase project ref          | `DatabaseObservation.projectRef`           |
-| Runtime `/api/version` commit | `RuntimeObservation.commitSha`             |
+| Provider concern              | Normalized field                               |
+| ----------------------------- | ---------------------------------------------- |
+| Local HEAD SHA                | `SourceObservation.headSha`                    |
+| Local branch / detached state | `SourceObservation.branch`, `.detachedHead`    |
+| Working tree state            | `SourceObservation.workingTree` + counts/lists |
+| Local tracking ref SHA        | `SourceObservation.upstream.sha` (local only)  |
+| Ahead/behind vs tracking ref  | `SourceObservation.aheadBy` / `.behindBy`      |
+| GitHub branch SHA             | `SourceObservation.remoteHeadSha`              |
+| Vercel deployment SHA         | `DeploymentObservation.commitSha`              |
+| Vercel connected database     | `DeploymentObservation.connectedResources`     |
+| Supabase project ref          | `DatabaseObservation.projectRef`               |
+| Runtime `/api/version` commit | `RuntimeObservation.commitSha`                 |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
 are discarded after translation.
@@ -81,6 +86,12 @@ severity, status, and remediation.
 The foundation includes:
 
 - `DIRTY_WORKTREE` -> warning
+- `REPOSITORY_OPERATION_IN_PROGRESS` -> warning
+- `DETACHED_HEAD` -> warning
+- `NO_UPSTREAM_CONFIGURED` -> warning
+- `LOCAL_BRANCH_AHEAD_OF_UPSTREAM` -> informational warning
+- `LOCAL_BRANCH_BEHIND_UPSTREAM` -> warning
+- `LOCAL_BRANCH_DIVERGED` -> high warning
 - `DEPLOYMENT_SHA_MISMATCH` -> fail
 - `WRONG_DATABASE_PROJECT` -> fail
 - `PREVIEW_USES_PRODUCTION_DATABASE` -> critical fail
@@ -126,6 +137,8 @@ The optional runtime endpoint contains only commit, environment, and build time:
 
 ## Milestone sequence
 
-M0 is the current foundation. M1 adds local Git observations, M2 GitHub, M3 Vercel, M4 Supabase,
+M0 is the foundation. M1 (current) adds local Git observations through `packages/providers/src/git/`
+— an allowlisted, read-only `GitRunner` plus a `local-git` adapter producing `SourceObservation`
+(`docs/git-truth.md` covers semantics). M2 GitHub, M3 Vercel, M4 Supabase,
 M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the local
 topology UI, and M9 the action. Every adapter milestone starts with fixtures.

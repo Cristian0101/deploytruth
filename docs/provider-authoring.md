@@ -63,6 +63,15 @@ Each adapter needs:
 Use `createFixtureProvider` for rule tests. Live smoke tests, if added later, must be separately
 gated and never run as the default unit-test suite.
 
+## Local command-based adapters
+
+Adapters that observe local state (the `local-git` adapter is the model) do not use
+`ReadOnlyTransport`; they use a narrow injectable process runner that invokes a binary directly —
+no shell, allowlisted read-only subcommands, normalized typed errors. Never interpolate manifest
+values into argument lists. Raw process objects and command internals must not appear in
+observations. Local remote-tracking refs are not remote-authoritative evidence; report them under
+`upstream` and leave `remoteHeadSha` to remote-aware adapters (ADR 003).
+
 ## What not to do
 
 - Do not export SDK response types.
