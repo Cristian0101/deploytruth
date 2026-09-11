@@ -18,6 +18,7 @@
   "dependencies": {
     "@deploytruth/config": "workspace:*",
     "@deploytruth/core": "workspace:*",
+    "@deploytruth/providers": "workspace:*",
     "@deploytruth/reporter": "workspace:*",
     "commander": "^14.0.2"
   }

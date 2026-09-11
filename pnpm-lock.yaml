@@ -80,6 +80,9 @@ importers:
       '@deploytruth/core':
         specifier: workspace:*
         version: link:../core
+      '@deploytruth/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@deploytruth/reporter':
         specifier: workspace:*
         version: link:../reporter
@@ -112,6 +115,9 @@ importers:
       '@deploytruth/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/reporter:
     dependencies:
