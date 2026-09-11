@@ -1,0 +1,12 @@
+{
+  "provider": "github",
+  "repository": "acme/meridia",
+  "branch": "main",
+  "availability": {
+    "state": "unavailable",
+    "target": "repository",
+    "reason": "rate_limited",
+    "detail": "GitHub API rate limit exceeded.",
+    "rateLimit": { "limit": 60, "remaining": 0, "resetAt": "2026-09-11T14:00:00Z" }
+  }
+}

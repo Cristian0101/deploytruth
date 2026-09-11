@@ -2,5 +2,9 @@
   "provider": "github",
   "repository": "acme/meridia",
   "branch": "main",
-  "remoteHeadSha": "def456"
+  "remoteHeadSha": "def456",
+  "defaultBranch": "main",
+  "visibility": "public",
+  "archived": false,
+  "availability": { "state": "available" }
 }

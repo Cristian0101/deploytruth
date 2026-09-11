@@ -1,0 +1,14 @@
+{
+  "provider": "github",
+  "repository": "acme/meridia",
+  "branch": "release",
+  "defaultBranch": "main",
+  "visibility": "private",
+  "archived": false,
+  "availability": {
+    "state": "unavailable",
+    "target": "branch",
+    "reason": "not_found",
+    "detail": "GitHub returned not found for the declared branch; it is absent or access is restricted."
+  }
+}

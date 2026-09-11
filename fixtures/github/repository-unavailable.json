@@ -1,0 +1,11 @@
+{
+  "provider": "github",
+  "repository": "acme/meridia",
+  "branch": "main",
+  "availability": {
+    "state": "unavailable",
+    "target": "repository",
+    "reason": "not_found",
+    "detail": "GitHub returned not found; the repository is absent, renamed, or private without access."
+  }
+}
