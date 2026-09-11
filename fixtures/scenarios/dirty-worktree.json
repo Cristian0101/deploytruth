@@ -20,7 +20,6 @@
           "provider": "git",
           "branch": "main",
           "headSha": "abc123",
-          "remoteHeadSha": "abc123",
           "workingTree": "dirty",
           "upstream": {
             "remote": "origin",
@@ -30,6 +29,14 @@
           },
           "aheadBy": 0,
           "behindBy": 0
+        },
+        "remoteSource": {
+          "provider": "github",
+          "repository": "acme/meridia",
+          "branch": "main",
+          "remoteHeadSha": "abc123",
+          "defaultBranch": "main",
+          "availability": { "state": "available" }
         }
       }
     }

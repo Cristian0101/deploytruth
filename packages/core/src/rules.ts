@@ -33,6 +33,8 @@ const isCheckApplicable = (environment: DeclaredEnvironment, check: CheckName): 
   switch (check) {
     case 'local_git':
       return Boolean(environment.source);
+    case 'remote_source':
+      return Boolean(environment.source);
     case 'deployment_sha':
       return Boolean(environment.source && environment.deployment);
     case 'migrations':
@@ -51,6 +53,7 @@ const activeChecks = (environment: DeclaredEnvironment): readonly CheckName[] =>
   (
     [
       'local_git',
+      'remote_source',
       'deployment_sha',
       'migrations',
       'runtime_identity',
@@ -66,8 +69,14 @@ const activeChecks = (environment: DeclaredEnvironment): readonly CheckName[] =>
 const checkEnabled = (environment: DeclaredEnvironment, check?: CheckName): boolean =>
   !check || activeChecks(environment).includes(check);
 
+/**
+ * The best available source SHA: remote-authoritative evidence first (ADR 003/004), then the
+ * legacy merged field, then local HEAD.
+ */
 const sourceSha = (observation?: EnvironmentObservation): string | undefined =>
-  observation?.source?.remoteHeadSha ?? observation?.source?.headSha;
+  observation?.remoteSource?.remoteHeadSha ??
+  observation?.source?.remoteHeadSha ??
+  observation?.source?.headSha;
 
 const databaseConnection = (observation?: EnvironmentObservation) =>
   observation?.deployment?.connectedResources.find((connection) => connection.type === 'database');
@@ -300,6 +309,225 @@ export const localBranchDivergedRule: TruthRule = {
         affectedComponents: [sourceComponent(environment)],
         remediation:
           'Reconcile the divergence (merge or rebase) before relying on local Git state as deployment evidence.',
+      }),
+    ];
+  },
+};
+
+/**
+ * Remote-source rules compare the local `source` observation against the `remoteSource`
+ * observation; the two are never merged. A remote observation only counts as authoritative
+ * when its own evidence fields are present — an `availability` failure never fabricates truth.
+ */
+const isGitHubRemoteSource = (observation?: EnvironmentObservation): boolean =>
+  observation?.remoteSource?.provider === 'github';
+
+export const staleTrackingRefRule: TruthRule = {
+  code: 'STALE_TRACKING_REF',
+  check: 'remote_source',
+  evaluate: ({ environment, observation }) => {
+    const local = observation?.source;
+    const remote = observation?.remoteSource;
+    const trackingSha = local?.upstream?.sha;
+    const remoteSha = remote?.remoteHeadSha;
+    if (local?.provider !== 'git' || trackingSha === undefined || remoteSha === undefined) {
+      return [];
+    }
+    // Tracking refs and remote heads are only comparable for the same branch name; a local
+    // feature branch tracking ref must never be compared against the declared remote branch.
+    if (local.upstream?.branch !== remote?.branch || trackingSha === remoteSha) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'STALE_TRACKING_REF',
+        title: 'Local remote-tracking ref is stale',
+        description:
+          'The local remote-tracking ref reflects an earlier fetch and does not match the branch head the remote currently reports.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: remoteSha,
+        observed: trackingSha,
+        evidence: {
+          trackingRef: local.upstream?.ref ?? 'unknown',
+          trackingSha,
+          remoteBranch: remote?.branch ?? 'unknown',
+          remoteHeadSha: remoteSha,
+          repository: remote?.repository ?? environment.source?.repository ?? 'unknown',
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Fetch the remote (git fetch) to refresh the local tracking ref before comparing local and remote state.',
+      }),
+    ];
+  },
+};
+
+export const localHeadDiffersFromGitHubRule: TruthRule = {
+  code: 'LOCAL_HEAD_DIFFERS_FROM_GITHUB',
+  check: 'remote_source',
+  evaluate: ({ environment, observation }) => {
+    const local = observation?.source;
+    const remote = observation?.remoteSource;
+    const headSha = local?.headSha;
+    const remoteSha = remote?.remoteHeadSha;
+    if (
+      !isGitHubRemoteSource(observation) ||
+      headSha === undefined ||
+      remoteSha === undefined ||
+      headSha === remoteSha
+    ) {
+      return [];
+    }
+
+    // On a different branch (e.g. a feature branch), differing SHAs are expected — that is
+    // informational context, not a defect. Same-branch differences deserve a warning.
+    const onDeclaredBranch = local?.branch !== undefined && local.branch === remote?.branch;
+
+    return [
+      finding({
+        code: 'LOCAL_HEAD_DIFFERS_FROM_GITHUB',
+        title: onDeclaredBranch
+          ? 'Local HEAD differs from the GitHub branch head'
+          : 'Local checkout differs from the declared GitHub branch head',
+        description: onDeclaredBranch
+          ? 'The checked-out declared branch does not match the commit GitHub currently reports for it.'
+          : 'The local checkout is not on the declared source branch, so differing SHAs are expected context rather than a defect.',
+        severity: onDeclaredBranch ? 'WARNING' : 'INFO',
+        status: 'WARN',
+        expected: remoteSha,
+        observed: headSha,
+        evidence: {
+          localBranch: local?.branch ?? 'detached',
+          remoteBranch: remote?.branch ?? 'unknown',
+          localHeadSha: headSha,
+          remoteHeadSha: remoteSha,
+          repository: remote?.repository ?? environment.source?.repository ?? 'unknown',
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Confirm whether the local checkout is meant to represent the declared source branch; fetch, pull, or push to reconcile.',
+      }),
+    ];
+  },
+};
+
+export const declaredBranchDiffersFromGitHubDefaultRule: TruthRule = {
+  code: 'DECLARED_BRANCH_DIFFERS_FROM_GITHUB_DEFAULT',
+  check: 'remote_source',
+  evaluate: ({ environment, observation }) => {
+    const remote = observation?.remoteSource;
+    const declaredBranch = environment.source?.branch;
+    const defaultBranch = remote?.defaultBranch;
+    if (
+      !isGitHubRemoteSource(observation) ||
+      declaredBranch === undefined ||
+      defaultBranch === undefined ||
+      declaredBranch === defaultBranch
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DECLARED_BRANCH_DIFFERS_FROM_GITHUB_DEFAULT',
+        title: 'Declared branch is not the GitHub default branch',
+        description:
+          'The manifest declares a source branch that differs from the repository default branch; this is often intentional.',
+        severity: 'INFO',
+        status: 'WARN',
+        expected: defaultBranch,
+        observed: declaredBranch,
+        evidence: {
+          declaredBranch,
+          defaultBranch,
+          repository: remote?.repository ?? environment.source?.repository ?? 'unknown',
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'No action required unless the declared branch was meant to be the repository default.',
+      }),
+    ];
+  },
+};
+
+const githubUnavailableEvidence = (
+  remote: NonNullable<EnvironmentObservation['remoteSource']>,
+): Record<string, string | number> => ({
+  repository: remote.repository ?? 'unknown',
+  reason: remote.availability?.reason ?? 'unknown',
+  ...(remote.availability?.detail ? { detail: remote.availability.detail } : {}),
+  ...(remote.availability?.rateLimit?.resetAt
+    ? { rateLimitResetAt: remote.availability.rateLimit.resetAt }
+    : {}),
+  ...(remote.availability?.rateLimit?.remaining !== undefined
+    ? { rateLimitRemaining: remote.availability.rateLimit.remaining }
+    : {}),
+});
+
+export const githubRepositoryUnavailableRule: TruthRule = {
+  code: 'GITHUB_REPOSITORY_UNAVAILABLE',
+  check: 'remote_source',
+  evaluate: ({ environment, observation }) => {
+    const remote = observation?.remoteSource;
+    if (
+      !isGitHubRemoteSource(observation) ||
+      remote?.availability?.state !== 'unavailable' ||
+      remote.availability.target === 'branch'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'GITHUB_REPOSITORY_UNAVAILABLE',
+        title: 'GitHub repository could not be authoritatively observed',
+        description:
+          'GitHub did not return repository metadata; the repository may be absent, renamed, or private without sufficient permission.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'repository observable',
+        observed: remote.availability.reason ?? 'unavailable',
+        evidence: githubUnavailableEvidence(remote),
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Verify the declared owner/repository, configure DEPLOYTRUTH_GITHUB_TOKEN or GITHUB_TOKEN for private repositories, and retry after any rate-limit reset.',
+      }),
+    ];
+  },
+};
+
+export const githubBranchUnavailableRule: TruthRule = {
+  code: 'GITHUB_BRANCH_UNAVAILABLE',
+  check: 'remote_source',
+  evaluate: ({ environment, observation }) => {
+    const remote = observation?.remoteSource;
+    if (
+      !isGitHubRemoteSource(observation) ||
+      remote?.availability?.state !== 'unavailable' ||
+      remote.availability.target !== 'branch'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'GITHUB_BRANCH_UNAVAILABLE',
+        title: 'GitHub branch could not be authoritatively observed',
+        description:
+          'GitHub did not return branch metadata for the declared branch; the branch may be absent or access may be restricted.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: `branch ${remote?.branch ?? environment.source?.branch ?? 'unknown'} observable`,
+        observed: remote.availability.reason ?? 'unavailable',
+        evidence: {
+          ...githubUnavailableEvidence(remote),
+          branch: remote?.branch ?? environment.source?.branch ?? 'unknown',
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Verify the declared branch exists on the remote and that the configured credentials can read it.',
       }),
     ];
   },
@@ -555,6 +783,8 @@ const checkCoverage = (
   switch (check) {
     case 'local_git':
       return Boolean(observation?.source);
+    case 'remote_source':
+      return observation?.remoteSource?.availability?.state === 'available';
     case 'deployment_sha':
       return Boolean(sourceSha(observation) && observation?.deployment?.commitSha);
     case 'migrations':
@@ -610,6 +840,11 @@ export const defaultRules: readonly TruthRule[] = [
   localBranchAheadOfUpstreamRule,
   localBranchBehindUpstreamRule,
   localBranchDivergedRule,
+  staleTrackingRefRule,
+  localHeadDiffersFromGitHubRule,
+  declaredBranchDiffersFromGitHubDefaultRule,
+  githubRepositoryUnavailableRule,
+  githubBranchUnavailableRule,
   deploymentShaMismatchRule,
   wrongDatabaseProjectRule,
   previewUsesProductionDatabaseRule,

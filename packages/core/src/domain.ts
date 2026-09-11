@@ -46,6 +46,7 @@ export const safeValueSchema: z.ZodType<SafeValue> = z.lazy(() =>
 
 export const checkNameSchema = z.enum([
   'local_git',
+  'remote_source',
   'deployment_sha',
   'migrations',
   'runtime_identity',
@@ -57,6 +58,7 @@ export type CheckName = z.infer<typeof checkNameSchema>;
 export const checksSchema = z
   .object({
     local_git: z.boolean().optional(),
+    remote_source: z.boolean().optional(),
     deployment_sha: z.boolean().optional(),
     migrations: z.boolean().optional(),
     runtime_identity: z.boolean().optional(),
@@ -164,6 +166,47 @@ export const repositoryOperationSchema = z.enum([
 ]);
 export type RepositoryOperation = z.infer<typeof repositoryOperationSchema>;
 
+/** Normalized remote rate-limit metadata; never raw response headers. */
+export const remoteRateLimitSchema = z
+  .object({
+    limit: z.number().int().nonnegative().optional(),
+    remaining: z.number().int().nonnegative().optional(),
+    resetAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+export type RemoteRateLimit = z.infer<typeof remoteRateLimitSchema>;
+
+export const remoteUnavailableReasonSchema = z.enum([
+  'not_found',
+  'unauthorized',
+  'forbidden',
+  'rate_limited',
+  'server_error',
+  'unexpected_status',
+  'malformed_response',
+  'network_error',
+  'timeout',
+  'aborted',
+]);
+export type RemoteUnavailableReason = z.infer<typeof remoteUnavailableReasonSchema>;
+
+/**
+ * Whether the remote authority behind this observation was actually observed.
+ * Remote-aware adapters always set it; local-only adapters leave it unset.
+ */
+export const sourceAvailabilitySchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    /** The remote resource that could not be observed when state is unavailable. */
+    target: z.enum(['repository', 'branch']).optional(),
+    reason: remoteUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain credentials or raw payloads. */
+    detail: z.string().min(1).optional(),
+    rateLimit: remoteRateLimitSchema.optional(),
+  })
+  .strict();
+export type SourceAvailability = z.infer<typeof sourceAvailabilitySchema>;
+
 export const sourceObservationSchema = z
   .object({
     provider: z.string().min(1),
@@ -172,6 +215,14 @@ export const sourceObservationSchema = z
     headSha: z.string().min(1).optional(),
     /** Authoritative remote branch SHA. Only remote-aware adapters (M2+) may set this. */
     remoteHeadSha: z.string().min(1).optional(),
+    /** Default branch reported by the remote source host. Remote-aware adapters only. */
+    defaultBranch: z.string().min(1).optional(),
+    /** Repository visibility reported by the remote source host, when known. */
+    visibility: z.enum(['public', 'private', 'internal']).optional(),
+    /** True when the remote source host reports the repository as archived. */
+    archived: z.boolean().optional(),
+    /** Whether remote-authoritative evidence was actually obtained. Remote-aware adapters only. */
+    availability: sourceAvailabilitySchema.optional(),
     workingTree: z.enum(['clean', 'dirty', 'unknown']).default('unknown'),
     aheadBy: z.number().int().nonnegative().optional(),
     behindBy: z.number().int().nonnegative().optional(),
@@ -252,7 +303,13 @@ export type MigrationCatalogObservation = z.infer<typeof migrationCatalogObserva
 export const environmentObservationSchema = z
   .object({
     environment: z.string().min(1),
+    /** Local source evidence (the `git` adapter). Never remote-authoritative. */
     source: sourceObservationSchema.optional(),
+    /**
+     * Remote-authoritative source evidence (the `github` adapter in M2). Kept separate from
+     * `source` so local and remote claims are compared, never merged (ADR 004).
+     */
+    remoteSource: sourceObservationSchema.optional(),
     deployment: deploymentObservationSchema.optional(),
     database: databaseObservationSchema.optional(),
     runtime: runtimeObservationSchema.optional(),

@@ -15,7 +15,8 @@ const declaration = {
       kind: 'production',
       source: { provider: 'github', repository: 'acme/meridia', branch: 'main' },
       requiredEnvironmentVariables: [],
-      checks: { local_git: true },
+      // This file exercises local Git rules only; remote-source coverage is tested separately.
+      checks: { local_git: true, remote_source: false },
     },
   },
 } as const;

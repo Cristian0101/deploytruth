@@ -24,6 +24,7 @@
         "requiredEnvironmentVariables": ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"],
         "checks": {
           "local_git": true,
+          "remote_source": true,
           "deployment_sha": true,
           "migrations": true,
           "runtime_identity": true,
@@ -43,7 +44,6 @@
           "repository": "acme/meridia",
           "branch": "main",
           "headSha": "abc123",
-          "remoteHeadSha": "abc123",
           "workingTree": "clean",
           "upstream": {
             "remote": "origin",
@@ -54,6 +54,14 @@
           "aheadBy": 0,
           "behindBy": 0,
           "remoteNames": ["origin"]
+        },
+        "remoteSource": {
+          "provider": "github",
+          "repository": "acme/meridia",
+          "branch": "main",
+          "remoteHeadSha": "abc123",
+          "defaultBranch": "main",
+          "availability": { "state": "available" }
         },
         "deployment": {
           "provider": "vercel",

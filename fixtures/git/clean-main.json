@@ -2,6 +2,5 @@
   "provider": "git",
   "branch": "main",
   "headSha": "abc123",
-  "remoteHeadSha": "abc123",
   "workingTree": "clean"
 }

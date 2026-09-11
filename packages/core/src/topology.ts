@@ -88,7 +88,11 @@ export const buildEnvironmentTopology = (
         findingsFor(findings, environment.id, 'source'),
         {
           branch: environment.source.branch ?? 'unknown',
-          sha: observation?.source?.remoteHeadSha ?? observation?.source?.headSha ?? 'unknown',
+          sha:
+            observation?.remoteSource?.remoteHeadSha ??
+            observation?.source?.remoteHeadSha ??
+            observation?.source?.headSha ??
+            'unknown',
         },
       ),
     );

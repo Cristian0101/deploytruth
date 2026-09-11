@@ -17,7 +17,15 @@
     "environments": {
       "production": {
         "environment": "production",
-        "source": { "provider": "git", "remoteHeadSha": "abc123", "workingTree": "clean" },
+        "source": { "provider": "git", "headSha": "abc123", "workingTree": "clean" },
+        "remoteSource": {
+          "provider": "github",
+          "repository": "acme/meridia",
+          "branch": "main",
+          "remoteHeadSha": "abc123",
+          "defaultBranch": "main",
+          "availability": { "state": "available" }
+        },
         "deployment": {
           "provider": "vercel",
           "project": "meridia",
