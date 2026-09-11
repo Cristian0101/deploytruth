@@ -29,4 +29,61 @@ environments:
 `),
     ).toThrow(ConfigError);
   });
+
+  it.each(['foo', 'github.com/foo/bar', 'https://github.com/foo/bar', 'foo/bar/baz'])(
+    'rejects malformed repository declaration %s',
+    (repository) => {
+      expect(() =>
+        parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    source:
+      provider: github
+      repository: ${repository}
+      branch: main
+`),
+      ).toThrow(ConfigError);
+    },
+  );
+
+  it.each(['owner/repo', 'org-123/app.v2_final', 'a/b'])(
+    'accepts owner/repo declaration %s',
+    (repository) => {
+      const manifest = parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    source:
+      provider: github
+      repository: ${repository}
+      branch: main
+`);
+
+      expect(manifest.environments.production?.source?.repository).toBe(repository);
+    },
+  );
+
+  it.each(['../etc', 'a//b', 'white space', 'trailing/'])(
+    'rejects unsafe branch name %s',
+    (branch) => {
+      expect(() =>
+        parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    source:
+      provider: github
+      repository: acme/example
+      branch: "${branch}"
+`),
+      ).toThrow(ConfigError);
+    },
+  );
 });

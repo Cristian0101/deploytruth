@@ -11,11 +11,41 @@ import { z } from 'zod';
 
 const providerSchema = z.enum(['github', 'vercel', 'supabase']);
 
+/**
+ * GitHub identity is declared as a single `owner/repo` string. URLs, extra path segments, and
+ * bare names are rejected so the declaration is unambiguous (the GitHub adapter enforces the
+ * same grammar).
+ */
+export const GITHUB_REPOSITORY_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/;
+
+/** A safe Git branch-name subset: blocks `..`, `//`, and trailing `/` or `.`. */
+export const GIT_BRANCH_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,254})$/;
+
 const sourceInputSchema = z
   .object({
     provider: z.literal('github'),
-    repository: z.string().min(3),
-    branch: z.string().min(1),
+    repository: z
+      .string()
+      .regex(
+        GITHUB_REPOSITORY_PATTERN,
+        'repository must be in owner/repo form (for example acme/meridia)',
+      ),
+    branch: z
+      .string()
+      .regex(
+        GIT_BRANCH_PATTERN,
+        'branch may only contain letters, digits, and . _ / - and must start with an alphanumeric',
+      )
+      .refine(
+        (value) =>
+          !value.includes('..') &&
+          !value.includes('//') &&
+          !value.includes('@{') &&
+          !value.endsWith('/') &&
+          !value.endsWith('.'),
+        { message: 'branch must be a valid Git ref name' },
+      ),
   })
   .strict();
 
