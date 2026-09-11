@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@deploytruth/core": "workspace:*"
+    "@deploytruth/core": "workspace:*",
+    "zod": "^3.24.1"
   }
 }
