@@ -1,0 +1,41 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "deployment": { "provider": "vercel", "project": "meridia" },
+        "runtime": {
+          "url": "https://meridia.example.com/api/version",
+          "expectedEnvironment": "production"
+        },
+        "checks": { "runtime_identity": true }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "environment": "production",
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "commitSha": "abc123",
+          "connectedResources": [],
+          "environmentVariables": []
+        },
+        "runtime": {
+          "url": "https://meridia.example.com/api/version",
+          "reachable": true,
+          "statusCode": 200,
+          "commitSha": "xyz999",
+          "environment": "production"
+        }
+      }
+    }
+  },
+  "generatedAt": "2026-09-10T18:30:00Z"
+}

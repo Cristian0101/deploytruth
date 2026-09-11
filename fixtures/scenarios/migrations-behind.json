@@ -1,0 +1,36 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "database": {
+          "provider": "supabase",
+          "projectRef": "prod-db",
+          "migrationDirectory": "supabase/migrations"
+        },
+        "checks": { "migrations": true }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "environment": "production",
+        "database": {
+          "provider": "supabase",
+          "projectRef": "prod-db",
+          "appliedMigrationIds": ["001_init"]
+        },
+        "repositoryMigrations": {
+          "directory": "supabase/migrations",
+          "migrationIds": ["001_init", "002_profiles"]
+        }
+      }
+    }
+  },
+  "generatedAt": "2026-09-10T18:30:00Z"
+}

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@deploytruth/core": ["packages/core/src/index.ts"],
+      "@deploytruth/config": ["packages/config/src/index.ts"],
+      "@deploytruth/providers": ["packages/providers/src/index.ts"],
+      "@deploytruth/reporter": ["packages/reporter/src/index.ts"]
+    }
+  }
+}

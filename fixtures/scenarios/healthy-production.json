@@ -1,0 +1,84 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "source": { "provider": "github", "repository": "acme/meridia", "branch": "main" },
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "stableDomain": "https://meridia.example.com"
+        },
+        "database": {
+          "provider": "supabase",
+          "projectRef": "prod-db",
+          "migrationDirectory": "supabase/migrations"
+        },
+        "runtime": {
+          "url": "https://meridia.example.com/api/version",
+          "expectedEnvironment": "production"
+        },
+        "requiredEnvironmentVariables": ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"],
+        "checks": {
+          "local_git": true,
+          "deployment_sha": true,
+          "migrations": true,
+          "runtime_identity": true,
+          "environment_isolation": true,
+          "environment_variables": true
+        }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "environment": "production",
+        "source": {
+          "provider": "git",
+          "repository": "acme/meridia",
+          "branch": "main",
+          "headSha": "abc123",
+          "remoteHeadSha": "abc123",
+          "workingTree": "clean"
+        },
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "environment": "production",
+          "commitSha": "abc123",
+          "stableDomain": "https://meridia.example.com",
+          "connectedResources": [
+            { "type": "database", "provider": "supabase", "identifier": "prod-db" }
+          ],
+          "environmentVariables": [
+            { "name": "SUPABASE_URL", "present": true, "fingerprint": "8fd4e1a2…91c2" },
+            { "name": "NEXT_PUBLIC_SUPABASE_URL", "present": true, "fingerprint": "7cb7e1b0…aaa1" }
+          ]
+        },
+        "database": {
+          "provider": "supabase",
+          "projectRef": "prod-db",
+          "appliedMigrationIds": ["001_init", "002_profiles"]
+        },
+        "runtime": {
+          "url": "https://meridia.example.com/api/version",
+          "reachable": true,
+          "statusCode": 200,
+          "commitSha": "abc123",
+          "environment": "production",
+          "buildTime": "2026-09-10T18:24:00Z"
+        },
+        "repositoryMigrations": {
+          "directory": "supabase/migrations",
+          "migrationIds": ["001_init", "002_profiles"]
+        }
+      }
+    }
+  },
+  "generatedAt": "2026-09-10T18:30:00Z"
+}

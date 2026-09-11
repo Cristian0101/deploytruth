@@ -1,0 +1,24 @@
+{
+  "name": "@deploytruth/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "deploytruth": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@deploytruth/config": "workspace:*",
+    "@deploytruth/core": "workspace:*",
+    "@deploytruth/reporter": "workspace:*",
+    "commander": "^14.0.2"
+  }
+}

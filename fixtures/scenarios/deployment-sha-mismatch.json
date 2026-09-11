@@ -1,0 +1,32 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "source": { "provider": "github", "repository": "acme/meridia", "branch": "main" },
+        "deployment": { "provider": "vercel", "project": "meridia" },
+        "checks": { "deployment_sha": true }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "environment": "production",
+        "source": { "provider": "git", "remoteHeadSha": "abc123", "workingTree": "clean" },
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "commitSha": "def456",
+          "connectedResources": [],
+          "environmentVariables": []
+        }
+      }
+    }
+  },
+  "generatedAt": "2026-09-10T18:30:00Z"
+}

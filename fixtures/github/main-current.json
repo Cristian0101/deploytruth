@@ -1,0 +1,6 @@
+{
+  "provider": "github",
+  "repository": "acme/meridia",
+  "branch": "main",
+  "remoteHeadSha": "abc123"
+}

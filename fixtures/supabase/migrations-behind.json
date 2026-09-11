@@ -1,0 +1,5 @@
+{
+  "provider": "supabase",
+  "projectRef": "prod-db",
+  "appliedMigrationIds": ["001_init"]
+}

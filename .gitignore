@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+work/playwright/
+.DS_Store
+.deploytruth/reports/
+.env
+.env.*
+!.env.example

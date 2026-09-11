@@ -1,0 +1,12 @@
+version: 1
+project: example-app
+environments:
+  production:
+    kind: production
+    source:
+      provider: github
+      repository: example/example-app
+      branch: main
+    deployment:
+      provider: vercel
+      project: example-app

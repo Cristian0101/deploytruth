@@ -1,0 +1,13 @@
+{
+  "provider": "vercel",
+  "project": "meridia",
+  "environment": "preview",
+  "commitSha": "abc123",
+  "connectedResources": [
+    {
+      "type": "database",
+      "provider": "supabase",
+      "identifier": "prod-db"
+    }
+  ]
+}

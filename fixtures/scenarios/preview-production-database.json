@@ -1,0 +1,50 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "deployment": { "provider": "vercel", "project": "meridia" },
+        "database": { "provider": "supabase", "projectRef": "prod-db" },
+        "checks": { "environment_isolation": true }
+      },
+      "preview": {
+        "id": "preview",
+        "kind": "preview",
+        "deployment": { "provider": "vercel", "project": "meridia" },
+        "database": { "provider": "supabase", "projectRef": "preview-db" },
+        "checks": { "environment_isolation": true }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "environment": "production",
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "connectedResources": [
+            { "type": "database", "provider": "supabase", "identifier": "prod-db" }
+          ],
+          "environmentVariables": []
+        }
+      },
+      "preview": {
+        "environment": "preview",
+        "deployment": {
+          "provider": "vercel",
+          "project": "meridia",
+          "connectedResources": [
+            { "type": "database", "provider": "supabase", "identifier": "prod-db" }
+          ],
+          "environmentVariables": []
+        }
+      }
+    }
+  },
+  "generatedAt": "2026-09-10T18:30:00Z"
+}

@@ -1,0 +1,7 @@
+{
+  "provider": "vercel",
+  "project": "meridia",
+  "environment": "production",
+  "commitSha": "def456",
+  "connectedResources": []
+}

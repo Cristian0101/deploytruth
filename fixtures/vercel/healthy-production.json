@@ -1,0 +1,17 @@
+{
+  "provider": "vercel",
+  "project": "meridia",
+  "environment": "production",
+  "commitSha": "abc123",
+  "stableDomain": "https://meridia.example.com",
+  "connectedResources": [
+    {
+      "type": "database",
+      "provider": "supabase",
+      "identifier": "prod-db"
+    }
+  ],
+  "environmentVariables": [
+    { "name": "SUPABASE_URL", "present": true, "fingerprint": "8fd4e1a2…91c2" }
+  ]
+}
