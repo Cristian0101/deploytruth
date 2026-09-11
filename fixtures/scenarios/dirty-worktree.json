@@ -21,7 +21,15 @@
           "branch": "main",
           "headSha": "abc123",
           "remoteHeadSha": "abc123",
-          "workingTree": "dirty"
+          "workingTree": "dirty",
+          "upstream": {
+            "remote": "origin",
+            "branch": "main",
+            "ref": "refs/remotes/origin/main",
+            "sha": "abc123"
+          },
+          "aheadBy": 0,
+          "behindBy": 0
         }
       }
     }

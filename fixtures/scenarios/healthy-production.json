@@ -44,7 +44,16 @@
           "branch": "main",
           "headSha": "abc123",
           "remoteHeadSha": "abc123",
-          "workingTree": "clean"
+          "workingTree": "clean",
+          "upstream": {
+            "remote": "origin",
+            "branch": "main",
+            "ref": "refs/remotes/origin/main",
+            "sha": "abc123"
+          },
+          "aheadBy": 0,
+          "behindBy": 0,
+          "remoteNames": ["origin"]
         },
         "deployment": {
           "provider": "vercel",

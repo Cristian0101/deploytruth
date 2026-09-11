@@ -96,6 +96,215 @@ export const dirtyWorktreeRule: TruthRule = {
       : [],
 };
 
+/** Local-Git-only rules guard on the adapter id so remote observations never trigger them. */
+const isLocalGitSource = (observation?: EnvironmentObservation): boolean =>
+  observation?.source?.provider === 'git';
+
+const sourceComponent = (environment: DeclaredEnvironment): AffectedComponent =>
+  component('source', environment.id, environment.source?.repository);
+
+export const repositoryOperationInProgressRule: TruthRule = {
+  code: 'REPOSITORY_OPERATION_IN_PROGRESS',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const operations = observation?.source?.operationsInProgress ?? [];
+    if (!isLocalGitSource(observation) || operations.length === 0) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'REPOSITORY_OPERATION_IN_PROGRESS',
+        title: 'Repository has an unfinished operation',
+        description:
+          'A merge, rebase, cherry-pick, revert, or bisect is in progress, so HEAD may not represent a stable source state.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'normal',
+        observed: [...operations].sort(),
+        evidence: { operationsInProgress: [...operations].sort() },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Finish or abort the in-progress Git operation before treating local state as deployment evidence.',
+      }),
+    ];
+  },
+};
+
+export const detachedHeadRule: TruthRule = {
+  code: 'DETACHED_HEAD',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const source = observation?.source;
+    if (!isLocalGitSource(observation) || source?.detachedHead !== true) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DETACHED_HEAD',
+        title: 'HEAD is detached',
+        description:
+          'The repository is checked out at a commit rather than a branch, so local evidence is not tied to a moving branch.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: environment.source?.branch ?? 'a checked-out branch',
+        observed: source.headSha ?? 'detached',
+        evidence: { headSha: source.headSha ?? 'unknown' },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Check out the declared branch, or accept that detached HEAD makes branch-based truth checks inconclusive.',
+      }),
+    ];
+  },
+};
+
+export const noUpstreamConfiguredRule: TruthRule = {
+  code: 'NO_UPSTREAM_CONFIGURED',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const source = observation?.source;
+    if (
+      !isLocalGitSource(observation) ||
+      source?.detachedHead === true ||
+      !source?.branch ||
+      !source.headSha ||
+      source.upstream
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'NO_UPSTREAM_CONFIGURED',
+        title: 'Current branch has no configured upstream',
+        description:
+          'Without an upstream, DeployTruth cannot compare the local branch to its local remote-tracking ref.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: `upstream for ${source.branch}`,
+        observed: 'none',
+        evidence: { branch: source.branch, remoteNames: [...source.remoteNames].sort() },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Set an upstream for the local branch (git branch --set-upstream-to) or accept that drift is unverifiable locally.',
+      }),
+    ];
+  },
+};
+
+export const localBranchAheadOfUpstreamRule: TruthRule = {
+  code: 'LOCAL_BRANCH_AHEAD_OF_UPSTREAM',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const source = observation?.source;
+    if (
+      !isLocalGitSource(observation) ||
+      source?.upstream === undefined ||
+      (source.aheadBy ?? 0) === 0 ||
+      (source.behindBy ?? 0) > 0
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'LOCAL_BRANCH_AHEAD_OF_UPSTREAM',
+        title: 'Local branch is ahead of its tracking ref',
+        description:
+          'Local commits are not represented in the local remote-tracking ref, so deployed state may lag local state.',
+        severity: 'INFO',
+        status: 'WARN',
+        expected: 'aheadBy = 0',
+        observed: source.aheadBy,
+        evidence: {
+          branch: source.branch ?? 'unknown',
+          trackingRef: source.upstream.ref,
+          aheadBy: source.aheadBy ?? 0,
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Push or discard the unpushed commits; note the tracking ref only reflects the last local fetch.',
+      }),
+    ];
+  },
+};
+
+export const localBranchBehindUpstreamRule: TruthRule = {
+  code: 'LOCAL_BRANCH_BEHIND_UPSTREAM',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const source = observation?.source;
+    if (
+      !isLocalGitSource(observation) ||
+      source?.upstream === undefined ||
+      (source.behindBy ?? 0) === 0 ||
+      (source.aheadBy ?? 0) > 0
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'LOCAL_BRANCH_BEHIND_UPSTREAM',
+        title: 'Local branch is behind its tracking ref',
+        description:
+          'The local remote-tracking ref contains commits the checked-out branch lacks, so local evidence is stale relative to the last fetch.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'behindBy = 0',
+        observed: source.behindBy,
+        evidence: {
+          branch: source.branch ?? 'unknown',
+          trackingRef: source.upstream.ref,
+          behindBy: source.behindBy ?? 0,
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Integrate the tracked commits locally; the tracking ref reflects the last fetch, not live remote state.',
+      }),
+    ];
+  },
+};
+
+export const localBranchDivergedRule: TruthRule = {
+  code: 'LOCAL_BRANCH_DIVERGED',
+  check: 'local_git',
+  evaluate: ({ environment, observation }) => {
+    const source = observation?.source;
+    if (
+      !isLocalGitSource(observation) ||
+      source?.upstream === undefined ||
+      (source.aheadBy ?? 0) === 0 ||
+      (source.behindBy ?? 0) === 0
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'LOCAL_BRANCH_DIVERGED',
+        title: 'Local branch has diverged from its tracking ref',
+        description:
+          'Both the local branch and the local remote-tracking ref contain unique commits; source identity is ambiguous until reconciled.',
+        severity: 'HIGH',
+        status: 'WARN',
+        expected: 'aheadBy = 0, behindBy = 0',
+        observed: `aheadBy = ${source.aheadBy ?? 0}, behindBy = ${source.behindBy ?? 0}`,
+        evidence: {
+          branch: source.branch ?? 'unknown',
+          trackingRef: source.upstream.ref,
+          aheadBy: source.aheadBy ?? 0,
+          behindBy: source.behindBy ?? 0,
+        },
+        affectedComponents: [sourceComponent(environment)],
+        remediation:
+          'Reconcile the divergence (merge or rebase) before relying on local Git state as deployment evidence.',
+      }),
+    ];
+  },
+};
+
 export const deploymentShaMismatchRule: TruthRule = {
   code: 'DEPLOYMENT_SHA_MISMATCH',
   check: 'deployment_sha',
@@ -395,6 +604,12 @@ export const requiredObservationAvailableRule: TruthRule = {
 export const defaultRules: readonly TruthRule[] = [
   requiredObservationAvailableRule,
   dirtyWorktreeRule,
+  repositoryOperationInProgressRule,
+  detachedHeadRule,
+  noUpstreamConfiguredRule,
+  localBranchAheadOfUpstreamRule,
+  localBranchBehindUpstreamRule,
+  localBranchDivergedRule,
   deploymentShaMismatchRule,
   wrongDatabaseProjectRule,
   previewUsesProductionDatabaseRule,

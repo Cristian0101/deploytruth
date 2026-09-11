@@ -7,12 +7,28 @@ import { aggregateVerdict } from './verdict.js';
 const sortedEntries = <T>(record: Readonly<Record<string, T>>): readonly [string, T][] =>
   Object.entries(record).sort(([left], [right]) => left.localeCompare(right));
 
-export const evaluateTruth = (context: TruthContext, rules?: readonly TruthRule[]): TruthReport => {
+export interface EvaluateTruthOptions {
+  /**
+   * Restricts evaluation to these environment ids. Cross-environment declarations and
+   * observations remain fully visible to rules via `allDeclarations`/`allObservations`.
+   */
+  readonly environments?: readonly string[];
+}
+
+export const evaluateTruth = (
+  context: TruthContext,
+  rules?: readonly TruthRule[],
+  options?: EvaluateTruthOptions,
+): TruthReport => {
   const environments: EnvironmentTruth[] = [];
   const allFindings: TruthFinding[] = [];
   const topologies = [];
 
+  const selected = options?.environments;
   for (const [environmentId, declaration] of sortedEntries(context.declaration.environments)) {
+    if (selected !== undefined && !selected.includes(environmentId)) {
+      continue;
+    }
     const observation = context.observations.environments[environmentId];
     const findings = evaluateRules(
       {

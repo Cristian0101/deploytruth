@@ -134,16 +134,65 @@ export const connectionObservationSchema = z
   .strict();
 export type ConnectionObservation = z.infer<typeof connectionObservationSchema>;
 
+export const gitTrackingRefObservationSchema = z
+  .object({
+    remote: z.string().min(1),
+    branch: z.string().min(1),
+    /** Local remote-tracking ref, e.g. refs/remotes/origin/main. Not remote-authoritative. */
+    ref: z.string().min(1),
+    /** SHA the local tracking ref points at; undefined when it does not exist locally. */
+    sha: z.string().min(1).optional(),
+  })
+  .strict();
+export type GitTrackingRefObservation = z.infer<typeof gitTrackingRefObservationSchema>;
+
+export const worktreeObservationSchema = z
+  .object({
+    path: z.string().min(1),
+    branch: z.string().min(1).optional(),
+    headSha: z.string().min(1).optional(),
+  })
+  .strict();
+export type WorktreeObservation = z.infer<typeof worktreeObservationSchema>;
+
+export const repositoryOperationSchema = z.enum([
+  'merge',
+  'rebase',
+  'cherry-pick',
+  'revert',
+  'bisect',
+]);
+export type RepositoryOperation = z.infer<typeof repositoryOperationSchema>;
+
 export const sourceObservationSchema = z
   .object({
     provider: z.string().min(1),
     repository: z.string().min(1).optional(),
     branch: z.string().min(1).optional(),
     headSha: z.string().min(1).optional(),
+    /** Authoritative remote branch SHA. Only remote-aware adapters (M2+) may set this. */
     remoteHeadSha: z.string().min(1).optional(),
     workingTree: z.enum(['clean', 'dirty', 'unknown']).default('unknown'),
     aheadBy: z.number().int().nonnegative().optional(),
     behindBy: z.number().int().nonnegative().optional(),
+    detachedHead: z.boolean().default(false),
+    stagedCount: z.number().int().nonnegative().default(0),
+    modifiedCount: z.number().int().nonnegative().default(0),
+    untrackedCount: z.number().int().nonnegative().default(0),
+    unmergedCount: z.number().int().nonnegative().default(0),
+    /** Repository-relative paths; counts stay authoritative when a list is capped. */
+    stagedFiles: z.array(z.string().min(1)).default([]),
+    modifiedFiles: z.array(z.string().min(1)).default([]),
+    untrackedFiles: z.array(z.string().min(1)).default([]),
+    unmergedFiles: z.array(z.string().min(1)).default([]),
+    upstream: gitTrackingRefObservationSchema.optional(),
+    remoteNames: z.array(z.string().min(1)).default([]),
+    repositoryRoot: z.string().min(1).optional(),
+    gitDirectory: z.string().min(1).optional(),
+    commonGitDirectory: z.string().min(1).optional(),
+    isLinkedWorktree: z.boolean().default(false),
+    worktrees: z.array(worktreeObservationSchema).default([]),
+    operationsInProgress: z.array(repositoryOperationSchema).default([]),
   })
   .strict();
 export type SourceObservation = z.infer<typeof sourceObservationSchema>;
