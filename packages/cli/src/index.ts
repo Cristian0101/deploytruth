@@ -9,8 +9,16 @@ import {
   loadDeployTruthManifest,
   supportedManifestProviders,
 } from '@deploytruth/config';
-import { redactText } from '@deploytruth/core';
-import { localGitProvider } from '@deploytruth/providers';
+import { redactText, type SourceObservation } from '@deploytruth/core';
+import {
+  createGitHubProvider,
+  localGitProvider,
+  resolveGitHubCredential,
+  type GitHubSourceConfig,
+  type LocalGitConfig,
+  type ProviderDiagnostic,
+  type TruthProvider,
+} from '@deploytruth/providers';
 import { serializeTruthReport, writeReportFile } from '@deploytruth/reporter';
 import { Command } from 'commander';
 
@@ -51,8 +59,16 @@ interface CheckCommandOptions {
   readonly output?: string;
 }
 
-export const createCli = (): Command => {
+export interface CliDependencies {
+  /** Injectable providers for tests; production uses the real adapters. */
+  readonly gitProvider?: TruthProvider<LocalGitConfig, SourceObservation>;
+  readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+export const createCli = (dependencies: CliDependencies = {}): Command => {
   const program = new Command();
+  const env = dependencies.env ?? process.env;
 
   program
     .name('deploytruth')
@@ -85,15 +101,17 @@ export const createCli = (): Command => {
         const configPath = resolve(options.config);
         const manifest = await loadDeployTruthManifest(configPath);
         const environmentIds = Object.keys(manifest.environments).sort();
+        const gitProvider = dependencies.gitProvider ?? localGitProvider;
+        const githubProvider = dependencies.githubProvider ?? createGitHubProvider({ env });
 
         const gitDiagnostics = await Promise.all(
           environmentIds
             .filter((id) => manifest.environments[id]?.source !== undefined)
             .map(async (id) => {
-              const config = localGitProvider.validateConfig({
+              const config = gitProvider.validateConfig({
                 directory: dirname(configPath),
               });
-              const results = await localGitProvider.diagnose?.({
+              const results = await gitProvider.diagnose?.({
                 project: manifest.project,
                 environment: id,
                 config,
@@ -102,7 +120,56 @@ export const createCli = (): Command => {
             }),
         );
 
-        const hasError = gitDiagnostics.some(({ diagnostics }) =>
+        const credential = resolveGitHubCredential(env);
+        const githubDiagnostics = await Promise.all(
+          environmentIds
+            .filter((id) => manifest.environments[id]?.source?.provider === 'github')
+            .map(async (id) => {
+              const declared = manifest.environments[id]?.source;
+              const diagnostics: ProviderDiagnostic[] = [
+                {
+                  code: 'GITHUB_CREDENTIALS',
+                  title: 'GitHub credentials',
+                  status: credential === undefined ? 'warning' : 'ok',
+                  message:
+                    credential === undefined
+                      ? 'none — unauthenticated access only (public repositories, low rate limits)'
+                      : `available (${credential.variable})`,
+                },
+              ];
+              if (declared?.repository === undefined || declared.branch === undefined) {
+                diagnostics.push({
+                  code: 'GITHUB_CONFIG',
+                  title: 'GitHub configuration',
+                  status: 'error',
+                  message: 'source declarations require repository (owner/repo) and branch.',
+                });
+                return { environment: id, diagnostics };
+              }
+              try {
+                const config = githubProvider.validateConfig({
+                  repository: declared.repository,
+                  branch: declared.branch,
+                });
+                const results = await githubProvider.diagnose?.({
+                  project: manifest.project,
+                  environment: id,
+                  config,
+                });
+                diagnostics.push(...(results ?? []));
+              } catch (error) {
+                diagnostics.push({
+                  code: 'GITHUB_CONFIG',
+                  title: 'GitHub configuration',
+                  status: 'error',
+                  message: safeErrorMessage(error),
+                });
+              }
+              return { environment: id, diagnostics };
+            }),
+        );
+
+        const hasError = [...gitDiagnostics, ...githubDiagnostics].some(({ diagnostics }) =>
           diagnostics.some((entry) => entry.status === 'error'),
         );
         const result = {
@@ -112,6 +179,9 @@ export const createCli = (): Command => {
           supportedProviders: [...supportedManifestProviders],
           observations: {
             localGit: gitDiagnostics.flatMap(({ environment, diagnostics }) =>
+              diagnostics.map((entry) => ({ environment, ...entry })),
+            ),
+            github: githubDiagnostics.flatMap(({ environment, diagnostics }) =>
               diagnostics.map((entry) => ({ environment, ...entry })),
             ),
             deployment: 'NOT_IMPLEMENTED',
@@ -128,7 +198,7 @@ export const createCli = (): Command => {
           );
           console.log(`Environments: ${result.environments.join(', ')}`);
           console.log(`Declared provider families: ${result.supportedProviders.join(', ')}`);
-          for (const { environment, diagnostics } of gitDiagnostics) {
+          for (const { environment, diagnostics } of [...gitDiagnostics, ...githubDiagnostics]) {
             for (const entry of diagnostics) {
               const marker =
                 entry.status === 'ok' ? 'ok' : entry.status === 'warning' ? 'warn' : 'ERROR';
@@ -136,7 +206,7 @@ export const createCli = (): Command => {
             }
           }
           console.log(
-            'Local Git observation is active. Deployment, database, and runtime providers are not implemented yet.',
+            'Local Git and GitHub source observation are active. Deployment, database, and runtime providers are not implemented yet.',
           );
         }
         if (hasError) {
@@ -150,7 +220,9 @@ export const createCli = (): Command => {
 
   program
     .command('check')
-    .description('Evaluate declared truth for one environment against local Git evidence')
+    .description(
+      'Evaluate declared truth for one environment against local Git and GitHub evidence',
+    )
     .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
     .option('-e, --environment <name>', 'declared environment')
     .option('--strict', 'treat warnings as failures')
@@ -162,6 +234,13 @@ export const createCli = (): Command => {
           configPath: resolve(options.config),
           ...(options.environment !== undefined ? { environmentName: options.environment } : {}),
           ...(options.strict !== undefined ? { strict: options.strict } : {}),
+          ...(dependencies.gitProvider !== undefined
+            ? { gitProvider: dependencies.gitProvider }
+            : {}),
+          ...(dependencies.githubProvider !== undefined
+            ? { githubProvider: dependencies.githubProvider }
+            : {}),
+          env,
         });
 
         if (options.output !== undefined) {

@@ -19,6 +19,8 @@ environments:
       url: https://example.com/api/version
       expected_environment: production
     checks:
+      local_git: true
+      remote_source: true
       deployment_sha: true
       runtime_identity: true
       environment_isolation: true

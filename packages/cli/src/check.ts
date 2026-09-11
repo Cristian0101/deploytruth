@@ -11,7 +11,9 @@ import {
 import { ConfigError, loadDeployTruthManifest } from '@deploytruth/config';
 import {
   GitError,
+  createGitHubProvider,
   localGitProvider,
+  type GitHubSourceConfig,
   type TruthProvider,
   type LocalGitConfig,
 } from '@deploytruth/providers';
@@ -22,6 +24,10 @@ export interface CheckOptions {
   readonly strict?: boolean;
   /** Injectable for tests; defaults to the execFile-based local Git adapter. */
   readonly gitProvider?: TruthProvider<LocalGitConfig, SourceObservation>;
+  /** Injectable for tests; defaults to a GitHub adapter over the live GET-only transport. */
+  readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
+  /** Environment for credential resolution; defaults to process.env. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 export interface CheckExecution {
@@ -79,10 +85,48 @@ const observeLocalGit = async (
   }
 };
 
+const observeGitHub = async (
+  provider: TruthProvider<GitHubSourceConfig, SourceObservation>,
+  context: {
+    project: string;
+    environment: string;
+    repository: string;
+    branch: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ observation?: SourceObservation; diagnostic?: string }> => {
+  let config: GitHubSourceConfig;
+  try {
+    config = provider.validateConfig({
+      repository: context.repository,
+      branch: context.branch,
+    });
+  } catch {
+    return {
+      diagnostic:
+        'Invalid GitHub source declaration; expected repository in owner/repo form and a valid branch name.',
+    };
+  }
+
+  try {
+    const observation = await provider.observe({
+      project: context.project,
+      environment: context.environment,
+      config,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return { observation };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown GitHub observation failure';
+    return { diagnostic: redactText(message) };
+  }
+};
+
 /**
- * Loads the manifest, observes local Git truth for the selected environment when a source is
- * declared, and evaluates the deterministic rule set. Missing provider evidence remains an
- * explicit UNKNOWN/WARN signal; it never produces a false PASS.
+ * Loads the manifest, observes local Git truth and — when the declared source provider is
+ * GitHub — remote-authoritative GitHub truth for the selected environment, then evaluates the
+ * deterministic rule set. Missing provider evidence remains an explicit UNKNOWN/WARN signal; it
+ * never produces a false PASS.
  */
 export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckExecution> => {
   const manifest = await loadDeployTruthManifest(options.configPath);
@@ -91,16 +135,49 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
   const diagnostics: string[] = [];
 
   let source: SourceObservation | undefined;
+  let remoteSource: SourceObservation | undefined;
   if (environment?.source !== undefined) {
-    const provider = options.gitProvider ?? localGitProvider;
-    const result = await observeLocalGit(provider, {
-      project: manifest.project,
-      environment: environmentId,
-      directory: dirname(options.configPath),
-    });
-    source = result.observation;
-    if (result.diagnostic !== undefined) {
-      diagnostics.push(`local-git: ${result.diagnostic}`);
+    const observations: Promise<{ observation?: SourceObservation; diagnostic?: string }>[] = [
+      observeLocalGit(options.gitProvider ?? localGitProvider, {
+        project: manifest.project,
+        environment: environmentId,
+        directory: dirname(options.configPath),
+      }),
+    ];
+
+    const declared = environment.source;
+    const githubRequested = declared.provider === 'github';
+    if (githubRequested) {
+      const githubProvider =
+        options.githubProvider ??
+        createGitHubProvider({
+          ...(options.env !== undefined ? { env: options.env } : {}),
+        });
+      observations.push(
+        declared.repository !== undefined && declared.branch !== undefined
+          ? observeGitHub(githubProvider, {
+              project: manifest.project,
+              environment: environmentId,
+              repository: declared.repository,
+              branch: declared.branch,
+            })
+          : Promise.resolve({
+              diagnostic:
+                'GitHub source declarations require both repository (owner/repo) and branch.',
+            }),
+      );
+    }
+
+    const [localResult, remoteResult] = await Promise.all(observations);
+    source = localResult?.observation;
+    if (localResult?.diagnostic !== undefined) {
+      diagnostics.push(`local-git: ${localResult.diagnostic}`);
+    }
+    if (remoteResult !== undefined) {
+      remoteSource = remoteResult.observation;
+      if (remoteResult.diagnostic !== undefined) {
+        diagnostics.push(`github: ${remoteResult.diagnostic}`);
+      }
     }
   }
 
@@ -113,6 +190,7 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
           [environmentId]: {
             environment: environmentId,
             ...(source !== undefined ? { source } : {}),
+            ...(remoteSource !== undefined ? { remoteSource } : {}),
           },
         },
       },
@@ -197,6 +275,79 @@ const formatSourceSection = (
   return lines;
 };
 
+const subRow = (label: string, value: string): string => `    ${label.padEnd(18)} ${value}`;
+
+const formatGitHubSection = (
+  truth: EnvironmentTruth,
+  diagnostics: readonly string[],
+): readonly string[] => {
+  const remote = truth.observation?.remoteSource;
+  const lines = ['  GitHub'];
+
+  if (remote === undefined) {
+    const reason =
+      diagnostics
+        .find((entry) => entry.startsWith('github:'))
+        ?.slice('github:'.length)
+        .trim() ?? 'no GitHub observation available';
+    lines.push(subRow('Status', `NOT OBSERVED — ${reason}`));
+    return lines;
+  }
+
+  lines.push(subRow('Repository', remote.repository ?? 'unknown'));
+
+  if (remote.availability?.state === 'unavailable') {
+    const availability = remote.availability;
+    lines.push(
+      subRow(
+        'Status',
+        `UNAVAILABLE — ${availability.detail ?? availability.reason ?? 'authoritative source unavailable'}`,
+      ),
+    );
+    if (availability.rateLimit?.resetAt !== undefined) {
+      lines.push(subRow('Retry after', availability.rateLimit.resetAt));
+    }
+    return lines;
+  }
+
+  lines.push(subRow('Branch', remote.branch ?? 'unknown'));
+  lines.push(subRow('Authoritative SHA', shortSha(remote.remoteHeadSha)));
+  if (remote.defaultBranch !== undefined) {
+    lines.push(subRow('Default branch', remote.defaultBranch));
+  }
+  if (remote.visibility !== undefined) {
+    lines.push(subRow('Visibility', remote.visibility));
+  }
+  if (remote.archived === true) {
+    lines.push(subRow('Archived', 'yes (read-only on GitHub)'));
+  }
+  return lines;
+};
+
+/** VERIFIED only when local HEAD, the local tracking ref, and the GitHub head all agree. */
+const formatSourceTruthSummary = (truth: EnvironmentTruth): readonly string[] => {
+  const source = truth.observation?.source;
+  const remote = truth.observation?.remoteSource;
+  const remoteSha = remote?.remoteHeadSha;
+  if (remote?.availability?.state !== 'available' || remoteSha === undefined) {
+    return [];
+  }
+  const trackingSha = source?.upstream?.sha;
+  const agrees =
+    source?.headSha !== undefined &&
+    trackingSha !== undefined &&
+    source.headSha === remoteSha &&
+    trackingSha === remoteSha;
+  return agrees
+    ? [
+        row(
+          'Source truth',
+          `VERIFIED — local HEAD, tracking ref, and GitHub ${remote.branch ?? 'branch'} all point to ${shortSha(remoteSha)}`,
+        ),
+      ]
+    : [];
+};
+
 const notCheckedSection = (title: string, provider: string): readonly string[] => [
   title,
   row(provider, 'NOT CHECKED (adapter not implemented)'),
@@ -218,7 +369,11 @@ export const formatCheckReport = (execution: CheckExecution): string => {
   ];
 
   if (environment.source !== undefined) {
-    lines.push(...formatSourceSection(truth, execution.diagnostics), '');
+    lines.push(...formatSourceSection(truth, execution.diagnostics));
+    if (environment.source.provider === 'github') {
+      lines.push('', ...formatGitHubSection(truth, execution.diagnostics));
+    }
+    lines.push(...formatSourceTruthSummary(truth), '');
   }
   if (environment.deployment !== undefined) {
     lines.push(...notCheckedSection('DEPLOYMENT', environment.deployment.provider), '');

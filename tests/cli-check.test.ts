@@ -16,6 +16,7 @@ import {
   tempDir,
   write,
 } from './git-test-utils.js';
+import { createFixtureGitHubProvider } from './github-test-utils.js';
 
 const MANIFEST = `version: 1
 project: example
@@ -38,11 +39,13 @@ afterEach(cleanupTempDirs);
 describe('deploytruth check --environment', () => {
   it('incorporates real local Git truth and stays WARN while providers are unimplemented', async () => {
     const dir = initRepo(tempDir('dt-check-clean-'));
-    configureUpstream(dir, git(['rev-parse', 'HEAD'], dir));
+    const head = git(['rev-parse', 'HEAD'], dir);
+    configureUpstream(dir, head);
 
     const execution = await runEnvironmentCheck({
       configPath: manifestAt(dir),
       environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
     });
     const report = execution.report;
 
@@ -55,11 +58,18 @@ describe('deploytruth check --environment', () => {
     expect(source?.upstream?.ref).toBe('refs/remotes/origin/main');
     // Local tracking ref truth must not be presented as remote-authoritative.
     expect(source?.remoteHeadSha).toBeUndefined();
+    // The GitHub observation is a separate, remote-authoritative evidence object.
+    const remote = report.environments[0]?.observation?.remoteSource;
+    expect(remote?.provider).toBe('github');
+    expect(remote?.remoteHeadSha).toBe(head);
 
     const output = formatCheckReport(execution);
     expect(output).toContain('Git repository');
     expect(output).toContain('Tracking ref');
     expect(output).toContain('local ref; remote unverified');
+    expect(output).toContain('GitHub');
+    expect(output).toContain('Authoritative SHA');
+    expect(output).toContain('VERIFIED');
     expect(output).toContain('NOT CHECKED');
     expect(output).toContain('WARN');
   });
@@ -69,6 +79,7 @@ describe('deploytruth check --environment', () => {
     const execution = await runEnvironmentCheck({
       configPath: manifestAt(dir),
       environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider(),
     });
 
     expect(execution.report.verdict).toBe('WARN');
@@ -90,6 +101,7 @@ describe('deploytruth check --environment', () => {
     const execution = await runEnvironmentCheck({
       configPath: manifestAt(dir),
       environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider({ remoteSha: base }),
     });
     const codes = execution.report.findings.map((finding) => finding.code);
 
@@ -104,6 +116,9 @@ describe('deploytruth check --environment', () => {
       configPath: manifestAt(dir),
       environmentName: 'production',
       strict: true,
+      githubProvider: createFixtureGitHubProvider({
+        remoteSha: git(['rev-parse', 'HEAD'], dir),
+      }),
     });
 
     expect(execution.report.strict).toBe(true);
@@ -127,6 +142,9 @@ describe('deploytruth check --environment', () => {
     const execution = await runEnvironmentCheck({
       configPath: manifestAt(dir),
       environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider({
+        remoteSha: git(['rev-parse', 'HEAD'], dir),
+      }),
     });
 
     const serialized = serializeTruthReport(execution.report);
@@ -144,18 +162,23 @@ describe('deploytruth check --environment', () => {
     }
     expect(serialized).not.toContain('Bearer ');
     expect(serialized).not.toContain('ghp_');
+    expect(serialized).not.toContain('Authorization');
+    expect(serialized).not.toContain('rawOnlySentinel');
     // The repository root is intentionally absolute — it is the identity of the observation.
     expect(source?.repositoryRoot).toBe(canonical(dir));
   });
 
   it('runs through the commander wiring with a real repository', async () => {
     const dir = initRepo(tempDir('dt-check-cli-'));
-    configureUpstream(dir, git(['rev-parse', 'HEAD'], dir));
+    const head = git(['rev-parse', 'HEAD'], dir);
+    configureUpstream(dir, head);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const previousExit = process.exitCode;
 
     try {
-      await createCli().parseAsync([
+      await createCli({
+        githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+      }).parseAsync([
         'node',
         'deploytruth',
         'check',
