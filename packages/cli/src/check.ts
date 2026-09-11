@@ -227,7 +227,7 @@ export const formatCheckReport = (execution: CheckExecution): string => {
     lines.push(...notCheckedSection('DATABASE', environment.database.provider), '');
   }
   if (environment.runtime !== undefined) {
-    lines.push(...notCheckedSection('RUNTIME', environment.runtime.url), '');
+    lines.push(...notCheckedSection('RUNTIME', 'runtime endpoint'), '');
   }
   if (environment.requiredEnvironmentVariables.length > 0) {
     lines.push(

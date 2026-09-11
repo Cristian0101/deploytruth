@@ -164,6 +164,34 @@ describe('local Git truth rules', () => {
     expect(result).not.toContain('DETACHED_HEAD');
   });
 
+  it('does not fail on missing environment variables without a deployment observation', () => {
+    const withRequiredVars: TruthContext = {
+      declaration: {
+        ...declaration,
+        environments: {
+          production: {
+            ...declaration.environments.production,
+            requiredEnvironmentVariables: ['SUPABASE_URL'],
+            checks: { environment_variables: true },
+          },
+        },
+      },
+      observations: {
+        project: 'meridia',
+        environments: {
+          production: { environment: 'production', source: gitSource({}) },
+        },
+      },
+      generatedAt: '2026-09-11T00:00:00Z',
+    };
+
+    const report = evaluateTruth(withRequiredVars);
+    const found = report.findings.map((finding) => finding.code);
+    expect(found).not.toContain('ENVIRONMENT_VARIABLE_MISSING');
+    expect(found).toContain('REQUIRED_OBSERVATION_UNAVAILABLE');
+    expect(report.verdict).toBe('WARN');
+  });
+
   it('reports REQUIRED_OBSERVATION_UNAVAILABLE instead of passing when source is absent', () => {
     const contextWithoutObservation: TruthContext = {
       declaration: context(gitSource({})).declaration,

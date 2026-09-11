@@ -508,15 +508,15 @@ export const environmentVariableMissingRule: TruthRule = {
   code: 'ENVIRONMENT_VARIABLE_MISSING',
   check: 'environment_variables',
   evaluate: ({ environment, observation }) => {
-    if (environment.requiredEnvironmentVariables.length === 0) {
+    if (environment.requiredEnvironmentVariables.length === 0 || !observation?.deployment) {
       return [];
     }
 
     const present = new Map(
-      observation?.deployment?.environmentVariables.map((variable) => [
+      observation.deployment.environmentVariables.map((variable) => [
         variable.name,
         variable.present,
-      ]) ?? [],
+      ]),
     );
     const missing = environment.requiredEnvironmentVariables.filter(
       (name) => present.get(name) !== true,
