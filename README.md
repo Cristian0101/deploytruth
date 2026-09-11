@@ -6,9 +6,10 @@ DeployTruth compares declared deployment topology with provider-normalized obser
 produces deterministic PASS, WARN, or FAIL reports. It is local-first, read-only, and does not
 send telemetry by default.
 
-This repository currently contains the v0.1 foundation plus M1 local Git truth: contracts,
-fixtures, deterministic rules, safe reports, a working `check`/`doctor` CLI, a report-viewer
-boundary, and CI. Live GitHub, Vercel, and Supabase adapters begin in later milestones.
+This repository currently contains the v0.1 foundation, M1 local Git truth, and M2 GitHub
+authoritative source truth: contracts, fixtures, deterministic rules, safe reports, a working
+`check`/`doctor` CLI, a report-viewer boundary, and CI. Vercel and Supabase adapters begin in
+later milestones.
 
 ## Quick start
 
@@ -24,10 +25,11 @@ node packages/cli/dist/index.js check --config deploytruth.yml --environment pro
 ```
 
 `check` evaluates real local Git truth (branch, HEAD, working tree, tracking ref, ahead/behind,
-worktrees, in-progress operations) against the declared environment. Deployment, database, and
-runtime providers are not implemented yet, so their evidence is reported as unverified and the
-verdict stays `WARN` — never a false `PASS`. See [docs/git-truth.md](docs/git-truth.md) for what
-local Git truth does and does not prove.
+worktrees, in-progress operations) and remote-authoritative GitHub truth (repository metadata and
+the branch's live head SHA) against the declared environment. Deployment, database, and runtime
+providers are not implemented yet, so their evidence is reported as unverified and the verdict
+stays `WARN` — never a false `PASS`. See [docs/git-truth.md](docs/git-truth.md) and
+[docs/github-truth.md](docs/github-truth.md) for what each truth does and does not prove.
 
 The E2E seam is available as `pnpm test:e2e`; install Playwright Chromium first when running it on
 a new machine: `pnpm exec playwright install chromium`.

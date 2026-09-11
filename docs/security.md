@@ -62,6 +62,26 @@ file paths (capped; counts stay exact), never file contents. Repository root and
 paths are intentionally absolute — they are the identity of the observation in a local-first
 report that never leaves `.deploytruth/reports/` unless the user copies it.
 
+## GitHub API access
+
+The GitHub adapter reaches `api.github.com` through `createGitHubTransport`, a `ReadOnlyTransport`
+implementation that issues `GET` requests only — the contract type exposes no other verb and the
+implementation contains none. Remote URLs are never inspected; repository identity comes solely
+from the manifest's `owner/repo` declaration.
+
+Tokens resolve from `DEPLOYTRUTH_GITHUB_TOKEN` then `GITHUB_TOKEN` at observation time, are held
+inside the transport closure, and become an `Authorization` header on the wire only. They are
+never stored, serialized, logged, placed on an observation, included in errors, or present in
+fixtures. `doctor` reports `available`/`none` plus the variable _name_ — never the value.
+Unauthenticated access is valid for public repositories; a private repository without a usable
+token produces `unavailable` evidence, not fabricated truth.
+
+Error normalization never echoes request internals: status codes map to fixed `reason` strings
+(`not_found`, `unauthorized`, `forbidden`, `rate_limited`, `server_error`, `unexpected_status`,
+`malformed_response`, `network_error`, `timeout`, `aborted`) with fixed detail text. Rate-limit
+metadata is limited to `limit`, `remaining`, and `resetAt` — raw response headers are never
+copied into observations.
+
 ## Local UI and storage
 
 The Vite development server is explicitly bound to `127.0.0.1`. Local reports are written only to
@@ -72,6 +92,8 @@ Telemetry is not implemented and must remain opt-in if it is ever proposed.
 
 - Does it use only read-only API operations?
 - Are raw responses discarded before return?
+- Does the transport expose `get()` only, with no mutation verb anywhere in the runtime path?
+- Are credentials resolved from the environment and held outside the adapter entirely?
 - Could an error contain an authorization header or URL credentials?
 - Does the normalized observation use presence/fingerprint rather than a secret value?
 - Are fixtures fabricated and sanitized?

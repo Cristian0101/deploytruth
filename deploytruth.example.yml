@@ -26,6 +26,7 @@ environments:
       - NEXT_PUBLIC_SUPABASE_URL
     checks:
       local_git: true
+      remote_source: true
       deployment_sha: true
       migrations: true
       runtime_identity: true

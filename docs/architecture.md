@@ -44,14 +44,17 @@ The engine works with three models:
 | Working tree state            | `SourceObservation.workingTree` + counts/lists |
 | Local tracking ref SHA        | `SourceObservation.upstream.sha` (local only)  |
 | Ahead/behind vs tracking ref  | `SourceObservation.aheadBy` / `.behindBy`      |
-| GitHub branch SHA             | `SourceObservation.remoteHeadSha`              |
-| Vercel deployment SHA         | `DeploymentObservation.commitSha`              |
-| Vercel connected database     | `DeploymentObservation.connectedResources`     |
-| Supabase project ref          | `DatabaseObservation.projectRef`               |
-| Runtime `/api/version` commit | `RuntimeObservation.commitSha`                 |
+| GitHub branch SHA             | `remoteSource.remoteHeadSha`                   |
+| GitHub default branch         | `remoteSource.defaultBranch`                   |
+| Remote observability          | `remoteSource.availability`                    |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
 are discarded after translation.
+
+An environment's source evidence is a **pair**: `source` is the local observation (`git`
+adapter), `remoteSource` is the remote-authoritative observation (`github` adapter). They are
+never merged — rules compare the two claims (ADR 004). Remote adapters always set `availability`,
+so a failed API call produces `unavailable` evidence rather than fabricated truth.
 
 ## Manifest
 
@@ -83,6 +86,10 @@ A rule has a stable code, optional check selector, and pure `evaluate(context)` 
 returns findings with deterministic expected/observed values, safe evidence, affected components,
 severity, status, and remediation.
 
+A `remote_source` check applies whenever a source is declared: it is covered only by an
+`available` `remoteSource` observation, so absent or failed GitHub evidence blocks `PASS` through
+`REQUIRED_OBSERVATION_UNAVAILABLE`.
+
 The foundation includes:
 
 - `DIRTY_WORKTREE` -> warning
@@ -92,6 +99,11 @@ The foundation includes:
 - `LOCAL_BRANCH_AHEAD_OF_UPSTREAM` -> informational warning
 - `LOCAL_BRANCH_BEHIND_UPSTREAM` -> warning
 - `LOCAL_BRANCH_DIVERGED` -> high warning
+- `STALE_TRACKING_REF` -> warning
+- `LOCAL_HEAD_DIFFERS_FROM_GITHUB` -> warning (INFO off the declared branch)
+- `DECLARED_BRANCH_DIFFERS_FROM_GITHUB_DEFAULT` -> informational
+- `GITHUB_REPOSITORY_UNAVAILABLE` -> warning
+- `GITHUB_BRANCH_UNAVAILABLE` -> warning
 - `DEPLOYMENT_SHA_MISMATCH` -> fail
 - `WRONG_DATABASE_PROJECT` -> fail
 - `PREVIEW_USES_PRODUCTION_DATABASE` -> critical fail
@@ -137,8 +149,10 @@ The optional runtime endpoint contains only commit, environment, and build time:
 
 ## Milestone sequence
 
-M0 is the foundation. M1 (current) adds local Git observations through `packages/providers/src/git/`
+M0 is the foundation. M1 adds local Git observations through `packages/providers/src/git/`
 — an allowlisted, read-only `GitRunner` plus a `local-git` adapter producing `SourceObservation`
-(`docs/git-truth.md` covers semantics). M2 GitHub, M3 Vercel, M4 Supabase,
-M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the local
-topology UI, and M9 the action. Every adapter milestone starts with fixtures.
+(`docs/git-truth.md` covers semantics). M2 (current) adds remote-authoritative GitHub truth
+through `packages/providers/src/github/` — a GET-only REST transport plus a `github` adapter
+producing the `remoteSource` observation (`docs/github-truth.md`, ADR 004). M3 Vercel, M4
+Supabase, M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the
+local topology UI, and M9 the action. Every adapter milestone starts with fixtures.

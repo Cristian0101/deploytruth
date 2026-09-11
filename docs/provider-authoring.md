@@ -72,6 +72,15 @@ values into argument lists. Raw process objects and command internals must not a
 observations. Local remote-tracking refs are not remote-authoritative evidence; report them under
 `upstream` and leave `remoteHeadSha` to remote-aware adapters (ADR 003).
 
+## Remote-authoritative adapters
+
+Remote source adapters (the `github` adapter is the model) produce the separate `remoteSource`
+observation — never write remote fields onto the local `source` observation (ADR 004). They must
+always set `availability`: `available` when authoritative fields like `remoteHeadSha` were
+observed, `unavailable` with a normalized `reason` otherwise. An unavailable observation is the
+correct output of a failed call; returning fabricated or partial truth is not. Credentials belong
+inside the transport closure, never in adapter config or observations.
+
 ## What not to do
 
 - Do not export SDK response types.
