@@ -10,3 +10,4 @@ work/playwright/
 .env.*
 !.env.example
 .vercel/
+**/supabase/.temp/

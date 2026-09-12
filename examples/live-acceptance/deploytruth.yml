@@ -1,0 +1,37 @@
+# Non-secret identifiers for the isolated DeployTruth live acceptance environment.
+# Credentials are resolved from local environment variables and never belong here.
+version: 1
+project: deploytruth-live-acceptance
+
+environments:
+  acceptance:
+    kind: production
+    source:
+      provider: github
+      repository: Cristian0101/deploytruth
+      branch: main
+    deployment:
+      provider: vercel
+      project: deploytruth-live-acceptance
+      scope: cristiansa379-8787s-projects
+      target: production
+      domain: deploytruth-live-acceptance.vercel.app
+    database:
+      provider: supabase
+      project_ref: wxzqzkkuozujicoywcur
+      migrations:
+        directory: examples/live-acceptance/supabase/migrations
+    runtime:
+      url: https://deploytruth-live-acceptance.vercel.app/api/version
+      expected_environment: production
+    required_environment_variables:
+      - SUPABASE_URL
+      - SUPABASE_PROJECT_REF
+    checks:
+      local_git: true
+      remote_source: true
+      deployment_sha: true
+      migrations: true
+      runtime_identity: true
+      environment_isolation: true
+      environment_variables: true

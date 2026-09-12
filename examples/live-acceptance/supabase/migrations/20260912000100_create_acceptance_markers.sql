@@ -4,5 +4,7 @@ create table public.deploytruth_acceptance_markers (
   created_at timestamptz not null default now()
 );
 
+alter table public.deploytruth_acceptance_markers enable row level security;
+
 comment on table public.deploytruth_acceptance_markers is
   'Harmless schema marker for DeployTruth live acceptance.';

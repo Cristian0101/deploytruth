@@ -94,6 +94,19 @@ const projectPayloadSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).optional(),
   alias: z.array(projectAliasEntrySchema).optional(),
+  targets: z
+    .object({
+      production: z
+        .object({
+          id: z.string().min(1),
+          alias: z.array(z.string().min(1)).optional(),
+        })
+        .passthrough()
+        .nullable()
+        .optional(),
+    })
+    .passthrough()
+    .optional(),
 });
 
 const deploymentPayloadSchema = z.object({
@@ -117,6 +130,7 @@ const deploymentPayloadSchema = z.object({
 });
 
 type ProjectAliasEntry = z.infer<typeof projectAliasEntrySchema>;
+type ProjectPayload = z.infer<typeof projectPayloadSchema>;
 
 type FetchSuccess = {
   readonly ok: true;
@@ -394,6 +408,25 @@ const resolveProduction = (
   };
 };
 
+/**
+ * Vercel currently reports the promoted production deployment under `targets.production`, while
+ * older project payloads may include full alias assignments at top level. Normalize both forms as
+ * routing evidence; if they disagree, the existing resolver remains fail-closed and ambiguous.
+ */
+const productionAliasesFrom = (project: ProjectPayload): readonly ProjectAliasEntry[] => {
+  const target = project.targets?.production;
+  const targetAliases =
+    target === undefined || target === null
+      ? []
+      : (target.alias ?? []).map((domain) => ({
+          domain,
+          target: 'PRODUCTION',
+          environment: 'production',
+          deployment: { id: target.id },
+        }));
+  return [...(project.alias ?? []), ...targetAliases];
+};
+
 const normalizeState = (readyState: string | undefined): DeploymentState => {
   switch (readyState) {
     case 'READY':
@@ -519,7 +552,7 @@ const observeDeployment = async (
     );
   }
 
-  const aliases = projectPayload.data.alias ?? [];
+  const aliases = productionAliasesFrom(projectPayload.data);
   const production = resolveProduction(aliases, config.domain);
   if (production.kind !== 'resolved') {
     const ambiguous = production.kind === 'ambiguous';
@@ -681,7 +714,7 @@ const diagnoseDeployment = async (
     ),
   );
 
-  const aliases = projectPayload.data.alias ?? [];
+  const aliases = productionAliasesFrom(projectPayload.data);
   const production = resolveProduction(aliases, config.domain);
   if (production.kind === 'unassigned') {
     diagnostics.push(
