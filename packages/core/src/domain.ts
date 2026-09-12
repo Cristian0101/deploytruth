@@ -81,7 +81,12 @@ export const declaredDeploymentSchema = z
   .object({
     provider: z.string().min(1),
     project: z.string().min(1),
-    stableDomain: z.string().url().optional(),
+    /** Deployment target to observe. Only `production` is supported in M3. */
+    target: z.literal('production').optional(),
+    /** Optional provider account/team scope (for example a Vercel team slug or id). */
+    scope: z.string().min(1).optional(),
+    /** Optional declared stable domain as a bare hostname (for example app.example.com). */
+    domain: z.string().min(1).optional(),
   })
   .strict();
 export type DeclaredDeployment = z.infer<typeof declaredDeploymentSchema>;
@@ -172,6 +177,8 @@ export const remoteRateLimitSchema = z
     limit: z.number().int().nonnegative().optional(),
     remaining: z.number().int().nonnegative().optional(),
     resetAt: z.string().datetime({ offset: true }).optional(),
+    /** Server-supplied Retry-After hint in seconds, when the provider exposes one. */
+    retryAfter: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type RemoteRateLimit = z.infer<typeof remoteRateLimitSchema>;
@@ -257,16 +264,92 @@ export const environmentVariableObservationSchema = z
   .strict();
 export type EnvironmentVariableObservation = z.infer<typeof environmentVariableObservationSchema>;
 
+/**
+ * Deployment-specific unavailability reasons: the transport-level reasons a remote call can
+ * produce, plus control-plane cases only a deployment provider can hit (missing credentials,
+ * or a project whose current production deployment cannot be established).
+ */
+export const deploymentUnavailableReasonSchema = z.enum([
+  'missing_credentials',
+  'deployment_unavailable',
+  'not_found',
+  'unauthorized',
+  'forbidden',
+  'rate_limited',
+  'server_error',
+  'unexpected_status',
+  'malformed_response',
+  'network_error',
+  'timeout',
+  'aborted',
+]);
+export type DeploymentUnavailableReason = z.infer<typeof deploymentUnavailableReasonSchema>;
+
+/**
+ * Whether the deployment control plane behind this observation was actually observed.
+ * Deployment adapters always set it; a failed call produces `unavailable` evidence.
+ */
+export const deploymentAvailabilitySchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    /** The control-plane resource that could not be observed when state is unavailable. */
+    target: z.enum(['project', 'deployment']).optional(),
+    reason: deploymentUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain credentials or raw payloads. */
+    detail: z.string().min(1).optional(),
+    rateLimit: remoteRateLimitSchema.optional(),
+  })
+  .strict();
+export type DeploymentAvailability = z.infer<typeof deploymentAvailabilitySchema>;
+
+/** Normalized provider-agnostic production deployment state. */
+export const deploymentStateSchema = z.enum([
+  'ready',
+  'building',
+  'queued',
+  'error',
+  'canceled',
+  'unknown',
+]);
+export type DeploymentState = z.infer<typeof deploymentStateSchema>;
+
 export const deploymentObservationSchema = z
   .object({
     provider: z.string().min(1),
+    /** Whether the deployment control plane was actually observed. Deployment adapters set it. */
+    availability: deploymentAvailabilitySchema.optional(),
     project: z.string().min(1).optional(),
+    /** The deployment target observed (for example `production`). */
+    target: z.string().min(1).optional(),
     deploymentId: z.string().min(1).optional(),
+    /** Provider-reported deployment URL (usually an https URL or hostname). */
+    deploymentUrl: z.string().min(1).optional(),
     environment: z.string().min(1).optional(),
+    /** Normalized state of the observed current production deployment. */
+    state: deploymentStateSchema.optional(),
+    /** The source commit SHA the provider recorded for this deployment, when safely available. */
     commitSha: z.string().min(1).optional(),
-    stableDomain: z.string().url().optional(),
+    /** The source branch the provider recorded for this deployment, when safely available. */
+    sourceBranch: z.string().min(1).optional(),
+    /** The source repository (owner/repo) the provider recorded, when safely available. */
+    sourceRepository: z.string().min(1).optional(),
+    /** Creation timestamp of the observed deployment. */
+    createdAt: z.string().datetime({ offset: true }).optional(),
+    /** The declared stable domain, echoed as a bare hostname when declared. */
+    stableDomain: z.string().min(1).optional(),
+    /**
+     * Present only when a stable domain is declared: true when control-plane evidence confirms
+     * the domain currently resolves to the observed production deployment, false when it
+     * positively does not. Absent means verification was not possible.
+     */
+    stableDomainVerified: z.boolean().optional(),
     connectedResources: z.array(connectionObservationSchema).default([]),
-    environmentVariables: z.array(environmentVariableObservationSchema).default([]),
+    /**
+     * Variable-presence observations. Absent means "the provider did not observe variable
+     * presence" — never an empty claim. Adapters that do not fetch variable metadata leave
+     * this unset so coverage stays honest.
+     */
+    environmentVariables: z.array(environmentVariableObservationSchema).optional(),
   })
   .strict();
 export type DeploymentObservation = z.infer<typeof deploymentObservationSchema>;
