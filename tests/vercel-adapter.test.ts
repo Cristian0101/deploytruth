@@ -90,6 +90,31 @@ describe('Vercel adapter observation', () => {
     ]);
   });
 
+  it('CASE current-targets-payload: resolves the promoted production target and aliases', async () => {
+    const provider = createFixtureVercelProvider({
+      domain: `${TEST_PROJECT}.vercel.app`,
+      projectOverrides: {
+        alias: undefined,
+        targets: {
+          production: {
+            id: PRODUCTION_DEPLOYMENT_ID,
+            alias: [`${TEST_PROJECT}.vercel.app`, 'app.example.com'],
+            readyState: 'READY',
+          },
+        },
+      },
+    });
+
+    const observation = await observeWith(
+      provider,
+      vercelConfig(TEST_PROJECT, { domain: `${TEST_PROJECT}.vercel.app` }),
+    );
+
+    expect(observation.availability?.state).toBe('available');
+    expect(observation.deploymentId).toBe(PRODUCTION_DEPLOYMENT_ID);
+    expect(observation.stableDomainVerified).toBe(true);
+  });
+
   it('drops raw payload fields and environment-variable material from the observation', async () => {
     const provider = createFixtureVercelProvider();
     const observation = await observeWith(provider);

@@ -53,6 +53,10 @@ Required environment variable names:
 - `DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN`
 - `DEPLOYTRUTH_SUPABASE_DATABASE_URL`
 
+If the local Node trust store does not already include Supabase's CA, download the certificate from
+the acceptance project's Database settings and set `NODE_EXTRA_CA_CERTS` to that local certificate
+path. Keep certificate verification enabled.
+
 Never place their values in the manifest, documentation, reports, or Git.
 
 ## Expected M4 checks
@@ -68,5 +72,19 @@ remain expected UNKNOWN/WARN evidence until M5.
 
 ## Live identities
 
-The non-secret GitHub, Vercel, and Supabase identifiers are recorded here after isolated resources
-are created and verified.
+- GitHub: `Cristian0101/deploytruth`, authoritative branch `main`
+- Vercel project: `deploytruth-live-acceptance`
+- Vercel project ID: `prj_5BnoSZIrC6yEBrpl909trOXOqf9B`
+- Vercel team scope: `cristiansa379-8787s-projects`
+- Stable production domain: `deploytruth-live-acceptance.vercel.app`
+- Supabase project: `deploytruth-live-acceptance`
+- Supabase project ref: `wxzqzkkuozujicoywcur`
+- Supabase region: `us-east-1`
+
+These identifiers are safe to commit. Provider tokens, the database password, and the database URL
+remain only in the ignored local credential file.
+
+The Vercel production environment is configured with `SUPABASE_URL` and `SUPABASE_PROJECT_REF`.
+DeployTruth M4 observes Vercel and Supabase independently; it does not read those deployment
+variables or claim that the running application uses the intended Supabase project. That edge is
+the exact subject of M5.
