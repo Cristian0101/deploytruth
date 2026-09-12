@@ -119,6 +119,58 @@ describe('deploytruth check Vercel deployment truth', () => {
     expect(output).toContain('Retry after');
   });
 
+  it('reports divergent production aliases as ambiguous instead of picking one', async () => {
+    const dir = initRepo(tempDir('dt-vc-ambiguous-'));
+    const head = git(['rev-parse', 'HEAD'], dir);
+    configureUpstream(dir, head);
+
+    const execution = await runEnvironmentCheck({
+      configPath: manifestAt(dir),
+      environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+      vercelProvider: createFixtureVercelProvider({
+        projectOverrides: {
+          alias: [
+            {
+              domain: 'app.example.com',
+              target: 'PRODUCTION',
+              environment: 'production',
+              deployment: { id: 'dpl_a' },
+            },
+            {
+              domain: 'www.example.com',
+              target: 'PRODUCTION',
+              environment: 'production',
+              deployment: { id: 'dpl_b' },
+            },
+          ],
+        },
+      }),
+    });
+    const report = execution.report;
+
+    const deployment = report.environments[0]?.observation?.deployment;
+    expect(deployment?.availability).toMatchObject({
+      state: 'unavailable',
+      reason: 'ambiguous',
+    });
+    expect(deployment?.deploymentId).toBeUndefined();
+    expect(deployment?.commitSha).toBeUndefined();
+    expect(report.findings.map((entry) => entry.code)).toContain(
+      'VERCEL_PRODUCTION_ROUTING_AMBIGUOUS',
+    );
+    expect(report.findings.map((entry) => entry.code)).toContain(
+      'REQUIRED_OBSERVATION_UNAVAILABLE',
+    );
+    expect(report.findings.map((entry) => entry.code)).not.toContain('DEPLOYMENT_SHA_MISMATCH');
+    expect(report.verdict).toBe('WARN');
+    expect(report.verdict).not.toBe('PASS');
+
+    const output = formatCheckReport(execution);
+    expect(output).toContain('UNAVAILABLE');
+    expect(output).toContain('VERCEL_PRODUCTION_ROUTING_AMBIGUOUS');
+  });
+
   it('reports missing credentials as unavailable evidence', async () => {
     const dir = initRepo(tempDir('dt-vc-nocreds-'));
     const head = git(['rev-parse', 'HEAD'], dir);

@@ -99,7 +99,9 @@ The adapter requests project metadata and the current production deployment only
 deployment environment-variable values, build logs, or source files; if such fields are
 incidentally present in a response they are dropped during normalization (tests assert
 sentinel-shaped env material never survives). Error normalization mirrors the GitHub model plus
-`missing_credentials` and `deployment_unavailable`, and adds the `retryAfter` seconds hint.
+`missing_credentials`, `deployment_unavailable`, and `ambiguous` — divergent production aliases
+are reported as normalized domain→deployment evidence, never resolved by guessing — and adds
+the `retryAfter` seconds hint.
 
 ## Local UI and storage
 

@@ -3,6 +3,7 @@ import type {
   CheckName,
   DeclaredEnvironment,
   EnvironmentObservation,
+  SafeValue,
   TruthFinding,
 } from './domain.js';
 import type { TruthContext } from './domain.js';
@@ -624,8 +625,17 @@ const isVercelDeployment = (observation?: EnvironmentObservation): boolean =>
 
 const vercelUnavailableEvidence = (
   deployment: NonNullable<EnvironmentObservation['deployment']>,
-): Record<string, string | number> => ({
+): Record<string, SafeValue> => ({
   project: deployment.project ?? 'unknown',
+  ...(deployment.stableDomain !== undefined ? { declaredDomain: deployment.stableDomain } : {}),
+  ...(deployment.productionAssignments !== undefined && deployment.productionAssignments.length > 0
+    ? {
+        productionAssignments: deployment.productionAssignments.map((assignment) => ({
+          domain: assignment.domain,
+          deploymentId: assignment.deploymentId,
+        })),
+      }
+    : {}),
   reason: deployment.availability?.reason ?? 'unknown',
   ...(deployment.availability?.detail ? { detail: deployment.availability.detail } : {}),
   ...(deployment.availability?.rateLimit?.resetAt
@@ -679,7 +689,9 @@ export const vercelProductionDeploymentUnavailableRule: TruthRule = {
     if (
       !isVercelDeployment(observation) ||
       deployment?.availability?.state !== 'unavailable' ||
-      deployment.availability.target !== 'deployment'
+      deployment.availability.target !== 'deployment' ||
+      // Divergent production aliases without a declared domain are a distinct finding.
+      deployment.availability.reason === 'ambiguous'
     ) {
       return [];
     }
@@ -689,7 +701,7 @@ export const vercelProductionDeploymentUnavailableRule: TruthRule = {
         code: 'VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE',
         title: 'Current Vercel production deployment could not be determined',
         description:
-          'The project was observed, but Vercel control-plane evidence did not identify which deployment is currently serving production (for example, no production domain is assigned to a deployment).',
+          'The project was observed, but Vercel control-plane evidence did not identify which deployment is currently serving production (for example, no production domain is assigned to a deployment, or the declared domain is not assigned to one).',
         severity: 'WARNING',
         status: 'WARN',
         expected: 'current production deployment identifiable',
@@ -698,6 +710,57 @@ export const vercelProductionDeploymentUnavailableRule: TruthRule = {
         affectedComponents: [component('deployment', environment.id)],
         remediation:
           'Confirm the project has a production domain assigned to a deployment, then retry the observation.',
+      }),
+    ];
+  },
+};
+
+/**
+ * Divergent production aliases with no declared authoritative domain. DeployTruth prefers
+ * UNKNOWN over assumption: production is only ever resolved from an explicitly declared
+ * domain or from unanimous production aliases — never by majority, recency, or tie-break
+ * (ADR 005). The observation carries the normalized domain→deployment assignments as
+ * evidence and no deployment id or commit SHA, so deployment SHA checks cannot evaluate
+ * from a guessed deployment.
+ */
+export const vercelProductionRoutingAmbiguousRule: TruthRule = {
+  code: 'VERCEL_PRODUCTION_ROUTING_AMBIGUOUS',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const deployment = observation?.deployment;
+    if (
+      !isVercelDeployment(observation) ||
+      deployment?.availability?.state !== 'unavailable' ||
+      deployment.availability.reason !== 'ambiguous'
+    ) {
+      return [];
+    }
+
+    const assignments = deployment.productionAssignments ?? [];
+    const deploymentIds = [
+      ...new Set(assignments.map((assignment) => assignment.deploymentId)),
+    ].sort();
+
+    return [
+      finding({
+        code: 'VERCEL_PRODUCTION_ROUTING_AMBIGUOUS',
+        title: 'Vercel production routing is ambiguous',
+        description:
+          'Observed production domains resolve to different deployments and the manifest does not declare an authoritative production domain. DeployTruth reports the ambiguity instead of guessing which deployment serves production.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'one deployment serving all production domains',
+        observed: deploymentIds,
+        evidence: {
+          project: deployment.project ?? 'unknown',
+          productionAssignments: assignments.map((assignment) => ({
+            domain: assignment.domain,
+            deploymentId: assignment.deploymentId,
+          })),
+        },
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Declare the authoritative production domain in the manifest (deployment.domain), or reconcile the production domain assignments in the Vercel console so every production domain resolves to the same deployment.',
       }),
     ];
   },
@@ -1111,6 +1174,7 @@ export const defaultRules: readonly TruthRule[] = [
   deploymentSourceUnverifiedRule,
   vercelProjectUnavailableRule,
   vercelProductionDeploymentUnavailableRule,
+  vercelProductionRoutingAmbiguousRule,
   deploymentNotReadyRule,
   deploymentFailedRule,
   stableDomainStaleRule,

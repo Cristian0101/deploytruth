@@ -267,11 +267,13 @@ export type EnvironmentVariableObservation = z.infer<typeof environmentVariableO
 /**
  * Deployment-specific unavailability reasons: the transport-level reasons a remote call can
  * produce, plus control-plane cases only a deployment provider can hit (missing credentials,
- * or a project whose current production deployment cannot be established).
+ * a project whose current production deployment cannot be established, or divergent
+ * production-domain assignments that make production routing ambiguous).
  */
 export const deploymentUnavailableReasonSchema = z.enum([
   'missing_credentials',
   'deployment_unavailable',
+  'ambiguous',
   'not_found',
   'unauthorized',
   'forbidden',
@@ -301,6 +303,18 @@ export const deploymentAvailabilitySchema = z
   })
   .strict();
 export type DeploymentAvailability = z.infer<typeof deploymentAvailabilitySchema>;
+
+/**
+ * A normalized production-domain → deployment assignment observed at the control plane.
+ * Domain names and normalized deployment ids only — never raw provider payload fields.
+ */
+export const productionAssignmentSchema = z
+  .object({
+    domain: z.string().min(1),
+    deploymentId: z.string().min(1),
+  })
+  .strict();
+export type ProductionAssignment = z.infer<typeof productionAssignmentSchema>;
 
 /** Normalized provider-agnostic production deployment state. */
 export const deploymentStateSchema = z.enum([
@@ -343,6 +357,13 @@ export const deploymentObservationSchema = z
      * positively does not. Absent means verification was not possible.
      */
     stableDomainVerified: z.boolean().optional(),
+    /**
+     * The production-domain assignments the control plane reported, emitted only when no
+     * single production deployment could be resolved (divergent aliases, or a declared
+     * domain that is not assigned). Normalized evidence that lets findings explain _why_
+     * production is unknown instead of guessing.
+     */
+    productionAssignments: z.array(productionAssignmentSchema).optional(),
     connectedResources: z.array(connectionObservationSchema).default([]),
     /**
      * Variable-presence observations. Absent means "the provider did not observe variable

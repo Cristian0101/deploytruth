@@ -164,7 +164,74 @@ describe('Vercel adapter observation', () => {
     expect(observation.commitSha).toBe('b'.repeat(40));
   });
 
-  it('CASE divergent-aliases: resolves deterministically to the majority production target', async () => {
+  it('CASE unanimous-aliases: agreeing production aliases resolve without a declared domain', async () => {
+    const provider = createFixtureVercelProvider({
+      projectOverrides: {
+        alias: [
+          {
+            domain: 'app.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: PRODUCTION_DEPLOYMENT_ID },
+          },
+          {
+            domain: 'www.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: PRODUCTION_DEPLOYMENT_ID },
+          },
+          {
+            domain: 'example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: PRODUCTION_DEPLOYMENT_ID },
+          },
+        ],
+      },
+    });
+
+    const observation = await observeWith(provider);
+
+    expect(observation.availability?.state).toBe('available');
+    expect(observation.deploymentId).toBe(PRODUCTION_DEPLOYMENT_ID);
+  });
+
+  it('CASE divergent-aliases: a 1:1 production alias split is ambiguous, never a coin flip', async () => {
+    const provider = createFixtureVercelProvider({
+      projectOverrides: {
+        alias: [
+          {
+            domain: 'app.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_a' },
+          },
+          {
+            domain: 'www.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_b' },
+          },
+        ],
+      },
+    });
+
+    const observation = await observeWith(provider);
+
+    expect(observation.availability).toMatchObject({
+      state: 'unavailable',
+      target: 'deployment',
+      reason: 'ambiguous',
+    });
+    expect(observation.deploymentId).toBeUndefined();
+    expect(observation.commitSha).toBeUndefined();
+    expect(observation.productionAssignments).toEqual([
+      { domain: 'app.example.com', deploymentId: 'dpl_a' },
+      { domain: 'www.example.com', deploymentId: 'dpl_b' },
+    ]);
+  });
+
+  it('CASE divergent-aliases: even a 3:1 production alias majority stays ambiguous', async () => {
     const provider = createFixtureVercelProvider({
       projectOverrides: {
         alias: [
@@ -193,7 +260,19 @@ describe('Vercel adapter observation', () => {
 
     const observation = await observeWith(provider);
 
-    expect(observation.deploymentId).toBe('dpl_majority');
+    // Majority voting would pick dpl_majority; DeployTruth reports UNKNOWN instead.
+    expect(observation.availability).toMatchObject({
+      state: 'unavailable',
+      target: 'deployment',
+      reason: 'ambiguous',
+    });
+    expect(observation.deploymentId).toBeUndefined();
+    expect(observation.commitSha).toBeUndefined();
+    expect(observation.productionAssignments).toEqual([
+      { domain: 'a.example.com', deploymentId: 'dpl_minority' },
+      { domain: 'b.example.com', deploymentId: 'dpl_majority' },
+      { domain: 'c.example.com', deploymentId: 'dpl_majority' },
+    ]);
   });
 
   it('CASE redirects: redirect aliases never count as production assignments', async () => {
@@ -498,7 +577,7 @@ describe('Vercel adapter observation', () => {
     expect(observation.stableDomainVerified).toBe(true);
   });
 
-  it('CASE domain-stale: the declared domain pointing elsewhere does not verify', async () => {
+  it('CASE declared-domain-divergent: the declared domain resolves production even as the minority alias', async () => {
     const provider = createFixtureVercelProvider({
       projectOverrides: {
         alias: [
@@ -518,7 +597,7 @@ describe('Vercel adapter observation', () => {
             domain: 'app.example.com',
             target: 'PRODUCTION',
             environment: 'production',
-            deployment: { id: 'dpl_stale_other' },
+            deployment: { id: 'dpl_declared_target' },
           },
         ],
       },
@@ -529,10 +608,48 @@ describe('Vercel adapter observation', () => {
       vercelConfig(TEST_PROJECT, { domain: 'app.example.com' }),
     );
 
-    expect(observation.stableDomainVerified).toBe(false);
+    // Two aliases point at PRODUCTION_DEPLOYMENT_ID, but the declared domain is the
+    // authoritative routing identity — no majority vote.
+    expect(observation.availability?.state).toBe('available');
+    expect(observation.deploymentId).toBe('dpl_declared_target');
+    expect(observation.stableDomain).toBe('app.example.com');
+    expect(observation.stableDomainVerified).toBe(true);
   });
 
-  it('CASE domain-absent: an unattached declared domain does not verify', async () => {
+  it('CASE declared-domain-rollback: a rollback through the declared domain resolves its target', async () => {
+    const provider = createFixtureVercelProvider({
+      projectOverrides: {
+        alias: [
+          {
+            domain: 'app.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_rolled_back_to', url: 'old.vercel.app' },
+          },
+          {
+            domain: 'www.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_newer_bad', url: 'new.vercel.app' },
+          },
+        ],
+        latestDeployments: [{ id: 'dpl_newer_bad' }, { id: 'dpl_rolled_back_to' }],
+      },
+      sourceSha: 'b'.repeat(40),
+    });
+
+    const observation = await observeWith(
+      provider,
+      vercelConfig(TEST_PROJECT, { domain: 'app.example.com' }),
+    );
+
+    expect(observation.availability?.state).toBe('available');
+    expect(observation.deploymentId).toBe('dpl_rolled_back_to');
+    expect(observation.commitSha).toBe('b'.repeat(40));
+    expect(observation.stableDomainVerified).toBe(true);
+  });
+
+  it('CASE domain-absent: an unattached declared domain is unavailable, never a fallback', async () => {
     const provider = createFixtureVercelProvider();
 
     const observation = await observeWith(
@@ -540,10 +657,21 @@ describe('Vercel adapter observation', () => {
       vercelConfig(TEST_PROJECT, { domain: 'other.example.com' }),
     );
 
-    expect(observation.stableDomainVerified).toBe(false);
+    expect(observation.availability).toMatchObject({
+      state: 'unavailable',
+      target: 'deployment',
+      reason: 'deployment_unavailable',
+    });
+    expect(observation.deploymentId).toBeUndefined();
+    expect(observation.stableDomain).toBe('other.example.com');
+    // The observed production routing is still reported as normalized evidence.
+    expect(observation.productionAssignments).toEqual([
+      { domain: 'app.example.com', deploymentId: PRODUCTION_DEPLOYMENT_ID },
+      { domain: `${TEST_PROJECT}.vercel.app`, deploymentId: PRODUCTION_DEPLOYMENT_ID },
+    ]);
   });
 
-  it('CASE domain-unassigned: a listed domain without a deployment is inconclusive', async () => {
+  it('CASE domain-unassigned: a listed domain without a deployment is unavailable', async () => {
     const provider = createFixtureVercelProvider({
       projectOverrides: {
         alias: [
@@ -563,7 +691,13 @@ describe('Vercel adapter observation', () => {
       vercelConfig(TEST_PROJECT, { domain: 'app.example.com' }),
     );
 
-    expect(observation.stableDomainVerified).toBeUndefined();
+    expect(observation.availability).toMatchObject({
+      state: 'unavailable',
+      target: 'deployment',
+      reason: 'deployment_unavailable',
+    });
+    expect(observation.deploymentId).toBeUndefined();
+    expect(observation.stableDomain).toBe('app.example.com');
   });
 
   it('CASE scope-slug: a slug scope becomes the slug query parameter', async () => {
@@ -661,5 +795,37 @@ describe('Vercel adapter diagnostics', () => {
 
     const metadata = diagnostics?.find((entry) => entry.code === 'VERCEL_SOURCE_METADATA');
     expect(metadata?.status).toBe('warning');
+  });
+
+  it('reports divergent production aliases as an ambiguous error, not a majority pick', async () => {
+    const provider = createFixtureVercelProvider({
+      projectOverrides: {
+        alias: [
+          {
+            domain: 'app.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_a' },
+          },
+          {
+            domain: 'www.example.com',
+            target: 'PRODUCTION',
+            environment: 'production',
+            deployment: { id: 'dpl_b' },
+          },
+        ],
+      },
+    });
+    const diagnostics = await provider.diagnose?.({
+      project: 'test-project',
+      environment: 'production',
+      config: vercelConfig(),
+    });
+
+    const production = diagnostics?.find((entry) => entry.code === 'VERCEL_PRODUCTION');
+    expect(production?.status).toBe('error');
+    expect(production?.message).toContain('ambiguous');
+    expect(production?.message).toContain('app.example.com -> dpl_a');
+    expect(production?.message).toContain('www.example.com -> dpl_b');
   });
 });

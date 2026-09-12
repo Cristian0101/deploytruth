@@ -232,6 +232,119 @@ describe('Vercel deployment truth rules', () => {
     expect(report.verdict).toBe('WARN');
   });
 
+  it('VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE when the declared domain is not assigned', () => {
+    const report = evaluateTruth(
+      context(
+        {
+          source: gitSource(),
+          remoteSource: gitHubSource(),
+          deployment: vercelDeployment({
+            availability: {
+              state: 'unavailable',
+              target: 'deployment',
+              reason: 'deployment_unavailable',
+              detail:
+                'The declared domain app.example.com is not assigned to a production deployment.',
+            },
+            deploymentId: undefined,
+            commitSha: undefined,
+            state: undefined,
+            stableDomain: 'app.example.com',
+            productionAssignments: [
+              { domain: 'meridia.vercel.app', deploymentId: 'dpl_a' },
+              { domain: 'www.example.com', deploymentId: 'dpl_b' },
+            ],
+          }),
+        },
+        {},
+        { domain: 'app.example.com' },
+      ),
+    );
+    const finding = report.findings.find(
+      (entry) => entry.code === 'VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE',
+    );
+
+    // The declaration is explicit: no fallback to the aliases that do resolve.
+    expect(finding).toBeDefined();
+    expect(finding?.evidence['declaredDomain']).toBe('app.example.com');
+    expect(finding?.evidence['productionAssignments']).toEqual([
+      { domain: 'meridia.vercel.app', deploymentId: 'dpl_a' },
+      { domain: 'www.example.com', deploymentId: 'dpl_b' },
+    ]);
+    expect(codes(report)).not.toContain('DEPLOYMENT_SHA_MISMATCH');
+    expect(report.verdict).toBe('WARN');
+  });
+
+  it('VERCEL_PRODUCTION_ROUTING_AMBIGUOUS warns when production aliases diverge', () => {
+    const report = evaluateTruth(
+      context({
+        source: gitSource(),
+        remoteSource: gitHubSource(),
+        deployment: vercelDeployment({
+          availability: {
+            state: 'unavailable',
+            target: 'deployment',
+            reason: 'ambiguous',
+            detail: 'Production domains resolve to different deployments.',
+          },
+          deploymentId: undefined,
+          commitSha: undefined,
+          state: undefined,
+          productionAssignments: [
+            { domain: 'app.example.com', deploymentId: 'dpl_a' },
+            { domain: 'www.example.com', deploymentId: 'dpl_b' },
+          ],
+        }),
+      }),
+    );
+    const finding = report.findings.find(
+      (entry) => entry.code === 'VERCEL_PRODUCTION_ROUTING_AMBIGUOUS',
+    );
+
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe('WARNING');
+    expect(finding?.status).toBe('WARN');
+    expect(finding?.observed).toEqual(['dpl_a', 'dpl_b']);
+    expect(finding?.evidence['productionAssignments']).toEqual([
+      { domain: 'app.example.com', deploymentId: 'dpl_a' },
+      { domain: 'www.example.com', deploymentId: 'dpl_b' },
+    ]);
+    // Ambiguity is its own finding, not the generic unavailability one.
+    expect(codes(report)).not.toContain('VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE');
+    expect(report.verdict).toBe('WARN');
+  });
+
+  it('ambiguous routing cannot satisfy deployment_sha coverage or fabricate a mismatch', () => {
+    const report = evaluateTruth(
+      context({
+        source: gitSource(),
+        remoteSource: gitHubSource(),
+        deployment: vercelDeployment({
+          availability: {
+            state: 'unavailable',
+            target: 'deployment',
+            reason: 'ambiguous',
+            detail: 'Production domains resolve to different deployments.',
+          },
+          deploymentId: undefined,
+          commitSha: undefined,
+          state: undefined,
+          productionAssignments: [
+            { domain: 'app.example.com', deploymentId: 'dpl_a' },
+            { domain: 'www.example.com', deploymentId: 'dpl_b' },
+          ],
+        }),
+      }),
+    );
+
+    // No guessed deployment means no deployment SHA evidence and no mismatch evaluation.
+    expect(codes(report)).toContain('REQUIRED_OBSERVATION_UNAVAILABLE');
+    expect(codes(report)).not.toContain('DEPLOYMENT_SHA_MISMATCH');
+    expect(codes(report)).not.toContain('DEPLOYMENT_SOURCE_UNVERIFIED');
+    expect(report.verdict).toBe('WARN');
+    expect(report.verdict).not.toBe('PASS');
+  });
+
   it('DEPLOYMENT_SOURCE_UNVERIFIED warns when the deployment carries no source commit', () => {
     const report = evaluateTruth(
       context({

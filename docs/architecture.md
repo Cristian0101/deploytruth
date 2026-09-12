@@ -51,6 +51,7 @@ The engine works with three models:
 | Deployment state              | `deployment.state` (ready/building/queued/…)   |
 | Deployment source commit      | `deployment.commitSha`, `.sourceBranch`        |
 | Deployment observability      | `deployment.availability`                      |
+| Ambiguous routing evidence    | `deployment.productionAssignments`             |
 | Stable domain verification    | `deployment.stableDomainVerified`              |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
@@ -60,9 +61,11 @@ An environment's source evidence is a **pair**: `source` is the local observatio
 adapter), `remoteSource` is the remote-authoritative observation (`github` adapter). They are
 never merged — rules compare the two claims (ADR 004). Deployment evidence is the separate
 `deployment` observation (`vercel` adapter in M3), which identifies the deployment currently
-serving production through provider control-plane assignments — never "the newest deployment"
-(ADR 005). Remote adapters always set `availability`, so a failed API call produces
-`unavailable` evidence rather than fabricated truth.
+serving production through provider control-plane assignments — never "the newest deployment",
+and never a majority pick among divergent production aliases (ADR 005): only an explicitly
+declared domain or unanimous production aliases resolve production; anything else is
+`unavailable`/`ambiguous` evidence. Remote adapters always set `availability`, so a failed API
+call produces `unavailable` evidence rather than fabricated truth.
 
 ## Manifest
 
@@ -116,6 +119,7 @@ The foundation includes:
 - `DEPLOYMENT_SOURCE_UNVERIFIED` -> warning
 - `VERCEL_PROJECT_UNAVAILABLE` -> warning
 - `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE` -> warning
+- `VERCEL_PRODUCTION_ROUTING_AMBIGUOUS` -> warning
 - `DEPLOYMENT_NOT_READY` -> warning
 - `DEPLOYMENT_FAILED` -> fail
 - `STABLE_DOMAIN_STALE` -> fail when positively stale, warning when inconclusive

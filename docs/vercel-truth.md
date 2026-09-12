@@ -19,10 +19,20 @@ It returns a normalized `deployment` observation — never a raw API payload.
 
 Vercel's Instant Rollback re-points production domains to an existing deployment without
 creating a new one, and `latestDeployments` mixes preview and production entries. DeployTruth
-therefore resolves production through the project's production-domain aliases (ADR 005): the
-deployment those aliases currently point at is the deployment serving production. Preview
-aliases and redirect entries are excluded; if production aliases disagree mid-migration, the
-deployment serving the most production domains wins with a deterministic tie-break.
+therefore resolves production through the project's production-domain aliases (ADR 005):
+preview aliases and redirect entries are excluded, and the remaining production assignments
+are resolved as follows:
+
+- **Declared domain.** When the manifest declares `domain`, that domain is the authoritative
+  routing identity — production is exactly the deployment its production alias points at, even
+  when every other production alias points elsewhere. An unassigned declared domain produces
+  `deployment_unavailable`; other aliases are never used as a fallback.
+- **Unanimous aliases.** Without a declared domain, production resolves only when all observed
+  production aliases agree on a single deployment.
+- **Ambiguous aliases.** When production aliases point at different deployments and no domain
+  is declared, the observation is `unavailable` with reason `ambiguous` — DeployTruth never
+  chooses a production deployment by alias majority, recency, or tie-break. UNKNOWN is
+  preferred over assumption.
 
 ## Normalized observation
 
@@ -54,12 +64,16 @@ carries no `commitSha` and truth becomes `DEPLOYMENT_SOURCE_UNVERIFIED`.
 ## Availability instead of assumption
 
 Every Vercel observation carries `availability`. Normalized reasons: `missing_credentials`,
-`deployment_unavailable` (project observed, but no production assignment exists), plus the
-shared remote reasons (`not_found`, `unauthorized`, `forbidden`, `rate_limited`,
-`server_error`, `unexpected_status`, `malformed_response`, `network_error`, `timeout`,
-`aborted`). A `404` is _unavailable_, never "does not exist" — tokens and scope determine what
-a caller can see. Rate-limit metadata is limited to `limit`, `remaining`, `resetAt`, and
-`retryAfter` seconds; raw headers are never copied.
+`deployment_unavailable` (project observed, but no production assignment exists — including a
+declared domain that is not assigned), `ambiguous` (production aliases diverge and no declared
+domain disambiguates), plus the shared remote reasons (`not_found`, `unauthorized`,
+`forbidden`, `rate_limited`, `server_error`, `unexpected_status`, `malformed_response`,
+`network_error`, `timeout`, `aborted`). A `404` is _unavailable_, never "does not exist" —
+tokens and scope determine what a caller can see. When production cannot be resolved but
+routing evidence exists, the observation carries `productionAssignments` — the normalized
+domain→deployment pairs — so findings can explain the ambiguity without raw payloads.
+Rate-limit metadata is limited to `limit`, `remaining`, `resetAt`, and `retryAfter` seconds;
+raw headers are never copied.
 
 ## Configuration
 
@@ -97,12 +111,12 @@ reports `available`/`none` plus the variable _name_.
 
 ## Stable domain verification
 
-When `domain` is declared, the project's alias table verifies whether that domain currently
-resolves to the production deployment: `true` when the domain's assigned deployment matches,
-`false` when it positively resolves elsewhere or is not attached to the project
-(`STABLE_DOMAIN_STALE`, HIGH/FAIL), absent when the assignment is inconclusive
-(`STABLE_DOMAIN_STALE`, WARNING/WARN). No DNS writes, alias writes, or browser probing — only
-Vercel control-plane evidence.
+When `domain` is declared, it is the authoritative routing identity (ADR 005): resolving
+production through the domain's production alias is what `stableDomainVerified: true`
+records. If the declared domain has no production assignment, the observation is
+`unavailable` (`deployment_unavailable`, echoed as `stableDomain`) rather than silently
+falling back to another production alias — the declaration is explicit and is respected.
+No DNS writes, alias writes, or browser probing — only Vercel control-plane evidence.
 
 ## Rollback semantics
 
@@ -113,15 +127,16 @@ manifest declare pinned/rolled-back state.
 
 ## Rules
 
-| Code                                       | Severity        | Condition                                                                           |
-| ------------------------------------------ | --------------- | ----------------------------------------------------------------------------------- |
-| `DEPLOYMENT_SHA_MISMATCH`                  | HIGH / FAIL     | Authoritative source SHA and deployment source SHA both exist and differ            |
-| `DEPLOYMENT_SOURCE_UNVERIFIED`             | WARNING / WARN  | Deployment observed but no trustworthy source commit                                |
-| `VERCEL_PROJECT_UNAVAILABLE`               | WARNING / WARN  | Project metadata could not be observed (credentials, scope, rename, API failure)    |
-| `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE` | WARNING / WARN  | Project observed but current production deployment cannot be established            |
-| `DEPLOYMENT_NOT_READY`                     | WARNING / WARN  | Production deployment is building, queued, or in an unrecognized state              |
-| `DEPLOYMENT_FAILED`                        | HIGH / FAIL     | Production deployment is in an error or canceled state                              |
-| `STABLE_DOMAIN_STALE`                      | HIGH or WARNING | Declared domain positively mis-assigned (FAIL), or verification inconclusive (WARN) |
+| Code                                       | Severity        | Condition                                                                             |
+| ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_SHA_MISMATCH`                  | HIGH / FAIL     | Authoritative source SHA and deployment source SHA both exist and differ              |
+| `DEPLOYMENT_SOURCE_UNVERIFIED`             | WARNING / WARN  | Deployment observed but no trustworthy source commit                                  |
+| `VERCEL_PROJECT_UNAVAILABLE`               | WARNING / WARN  | Project metadata could not be observed (credentials, scope, rename, API failure)      |
+| `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE` | WARNING / WARN  | Project observed but current production deployment cannot be established              |
+| `VERCEL_PRODUCTION_ROUTING_AMBIGUOUS`      | WARNING / WARN  | Production aliases resolve to different deployments; no declared domain disambiguates |
+| `DEPLOYMENT_NOT_READY`                     | WARNING / WARN  | Production deployment is building, queued, or in an unrecognized state                |
+| `DEPLOYMENT_FAILED`                        | HIGH / FAIL     | Production deployment is in an error or canceled state                                |
+| `STABLE_DOMAIN_STALE`                      | HIGH or WARNING | Declared domain positively mis-assigned (FAIL), or verification inconclusive (WARN)   |
 
 All deployment rules are gated by the `deployment_sha` check; `checks: { deployment_sha: false }`
 opts out entirely. The expected side of `DEPLOYMENT_SHA_MISMATCH` is the remote-authoritative
@@ -136,7 +151,9 @@ evidence, so deployment SHA truth cannot false-PASS.
   environment-isolation milestone. A manifest declaring `required_environment_variables` reports
   that evidence as unverified rather than assuming it.
 - Production resolution depends on Vercel's `alias[]` control-plane view; a project with no
-  production domain assignment reports `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE`.
+  production domain assignment reports `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE`, and
+  divergent production aliases without a declared domain report
+  `VERCEL_PRODUCTION_ROUTING_AMBIGUOUS` — never a majority guess.
 - Build logs, deployment cancellation, and every mutation endpoint are out of scope by design.
 
 ## Example

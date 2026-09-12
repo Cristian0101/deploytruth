@@ -182,6 +182,8 @@ const detailFor = (
       return 'No Vercel token is configured; set DEPLOYTRUTH_VERCEL_TOKEN or VERCEL_TOKEN.';
     case 'deployment_unavailable':
       return 'Vercel did not identify a current production deployment for this project.';
+    case 'ambiguous':
+      return 'Vercel production domains resolve to different deployments; which deployment serves production is ambiguous.';
     case 'not_found':
       return target === 'project'
         ? 'Vercel returned not found; the project is absent, renamed, or not visible to the configured credentials and scope.'
@@ -298,60 +300,97 @@ const isProductionAlias = (entry: ProjectAliasEntry): boolean => {
   return classification?.toLowerCase() === 'production' && entry.deployment?.id !== undefined;
 };
 
+interface ProductionAssignmentEvidence {
+  readonly domain: string;
+  readonly deploymentId: string;
+}
+
+type ProductionResolution =
+  | {
+      readonly kind: 'resolved';
+      readonly deploymentId: string;
+      readonly productionDomains: readonly string[];
+    }
+  | {
+      readonly kind: 'ambiguous';
+      readonly assignments: readonly ProductionAssignmentEvidence[];
+    }
+  | {
+      readonly kind: 'unassigned';
+      readonly assignments: readonly ProductionAssignmentEvidence[];
+    };
+
 /**
  * Resolves the deployment currently serving production. Production domain aliases are the
  * routing-layer assignment: instant rollbacks re-point them to an existing deployment without
- * creating a new one, so "newest production deployment" is not authoritative (ADR 005). When
- * aliases disagree (mid-migration), the deployment serving the most production domains wins;
- * ties break on the lexicographically smallest domain then deployment id — always deterministic.
+ * creating a new one, so "newest production deployment" is not authoritative (ADR 005).
+ *
+ * Resolution never picks a deployment by majority, recency, or tie-break — that would
+ * fabricate certainty:
+ *
+ * - A declared `domain` is the authoritative routing identity. Production is exactly the
+ *   deployment its production alias points at; if the declared domain has no production
+ *   assignment the result is `unassigned` — other aliases are never used as a fallback.
+ * - Without a declared domain, production resolves only when every production alias agrees
+ *   on a single deployment. Zero assignments are `unassigned`; divergent aliases are
+ *   `ambiguous` and carry the normalized domain→deployment evidence.
  */
-const resolveProductionDeploymentId = (
+const resolveProduction = (
   aliases: readonly ProjectAliasEntry[],
-): { deploymentId: string; productionDomains: readonly string[] } | undefined => {
-  const byDeployment = new Map<string, string[]>();
-  for (const entry of aliases.filter(isProductionAlias)) {
-    const id = entry.deployment?.id;
-    if (id === undefined) {
-      continue;
+  declaredDomain: string | undefined,
+): ProductionResolution => {
+  const assignments = aliases
+    .filter(isProductionAlias)
+    .flatMap((entry) => {
+      const deploymentId = entry.deployment?.id;
+      return deploymentId === undefined ? [] : [{ domain: entry.domain, deploymentId }];
+    })
+    .sort(
+      (left, right) =>
+        left.domain.localeCompare(right.domain) ||
+        left.deploymentId.localeCompare(right.deploymentId),
+    );
+
+  if (declaredDomain !== undefined) {
+    const declared = assignments.filter((assignment) => assignment.domain === declaredDomain);
+    const declaredIds = new Set(declared.map((assignment) => assignment.deploymentId));
+    if (declaredIds.size === 0) {
+      return { kind: 'unassigned', assignments };
     }
-    const domains = byDeployment.get(id) ?? [];
-    domains.push(entry.domain);
-    byDeployment.set(id, domains);
-  }
-  if (byDeployment.size === 0) {
-    return undefined;
+    if (declaredIds.size > 1) {
+      // Contradictory duplicate assignments for the declared domain are ambiguous, not a
+      // first-match guess.
+      return { kind: 'ambiguous', assignments };
+    }
+    const declaredId = declared[0]?.deploymentId;
+    if (declaredId === undefined) {
+      return { kind: 'unassigned', assignments };
+    }
+    return {
+      kind: 'resolved',
+      deploymentId: declaredId,
+      productionDomains: [
+        ...new Set(
+          assignments
+            .filter((assignment) => assignment.deploymentId === declaredId)
+            .map((assignment) => assignment.domain),
+        ),
+      ],
+    };
   }
 
-  const ranked = [...byDeployment.entries()].sort(
-    ([leftId, leftDomains], [rightId, rightDomains]) =>
-      rightDomains.length - leftDomains.length ||
-      (leftDomains.slice().sort()[0] ?? '').localeCompare(rightDomains.slice().sort()[0] ?? '') ||
-      leftId.localeCompare(rightId),
-  );
-  const winner = ranked[0];
-  if (winner === undefined) {
-    return undefined;
+  const deploymentIds = new Set(assignments.map((assignment) => assignment.deploymentId));
+  if (deploymentIds.size > 1) {
+    return { kind: 'ambiguous', assignments };
   }
-
-  return { deploymentId: winner[0], productionDomains: winner[1].slice().sort() };
-};
-
-/** The deployment id a declared domain currently resolves to, from control-plane aliases. */
-const domainAssignment = (
-  aliases: readonly ProjectAliasEntry[],
-  domain: string,
-): { found: boolean; redirect: boolean; deploymentId?: string } => {
-  const entry = aliases.find((candidate) => candidate.domain === domain);
-  if (entry === undefined) {
-    return { found: false, redirect: false };
-  }
-  if (entry.redirect !== undefined && entry.redirect !== null) {
-    return { found: true, redirect: true };
+  const only = assignments[0];
+  if (only === undefined) {
+    return { kind: 'unassigned', assignments };
   }
   return {
-    found: true,
-    redirect: false,
-    ...(entry.deployment?.id !== undefined ? { deploymentId: entry.deployment.id } : {}),
+    kind: 'resolved',
+    deploymentId: only.deploymentId,
+    productionDomains: [...new Set(assignments.map((assignment) => assignment.domain))],
   };
 };
 
@@ -430,12 +469,14 @@ const missingCredentialsObservation = (config: VercelDeploymentConfig): Deployme
       reason: 'missing_credentials',
       detail: detailFor('missing_credentials', 'project'),
     },
+    ...(config.domain !== undefined ? { stableDomain: config.domain } : {}),
   });
 
 const unavailableObservation = (
   config: VercelDeploymentConfig,
   failure: FetchFailure,
   target: AvailabilityTarget,
+  extras: Readonly<Record<string, unknown>> = {},
 ): DeploymentObservation =>
   deploymentObservationSchema.parse({
     provider: 'vercel',
@@ -443,6 +484,8 @@ const unavailableObservation = (
     target: 'production',
     environment: 'production',
     availability: unavailableAvailability(failure, target),
+    ...(config.domain !== undefined ? { stableDomain: config.domain } : {}),
+    ...extras,
   });
 
 const observeDeployment = async (
@@ -477,18 +520,26 @@ const observeDeployment = async (
   }
 
   const aliases = projectPayload.data.alias ?? [];
-  const production = resolveProductionDeploymentId(aliases);
-  if (production === undefined) {
+  const production = resolveProduction(aliases, config.domain);
+  if (production.kind !== 'resolved') {
+    const ambiguous = production.kind === 'ambiguous';
+    const detail = ambiguous
+      ? `Production domains resolve to different deployments (${production.assignments
+          .map((assignment) => `${assignment.domain} -> ${assignment.deploymentId}`)
+          .join(', ')}); DeployTruth does not guess which deployment serves production.`
+      : config.domain !== undefined
+        ? `The declared domain ${config.domain} is not assigned to a production deployment; other production aliases are not used as a fallback.`
+        : 'No production domain is assigned to a deployment; Vercel cannot identify a current production deployment.';
     return unavailableObservation(
       config,
       {
         ok: false,
-        reason: 'deployment_unavailable',
-        detail:
-          'No production domain is assigned to a deployment; Vercel cannot identify a current production deployment.',
+        reason: ambiguous ? 'ambiguous' : 'deployment_unavailable',
+        detail,
         ...(projectResult.rateLimit !== undefined ? { rateLimit: projectResult.rateLimit } : {}),
       },
       'deployment',
+      production.assignments.length > 0 ? { productionAssignments: production.assignments } : {},
     );
   }
 
@@ -519,19 +570,11 @@ const observeDeployment = async (
   }
 
   const deployment = deploymentPayload.data;
-  const assignment =
-    config.domain !== undefined ? domainAssignment(aliases, config.domain) : undefined;
-  // Positively verified or stale: the domain's assigned deployment id is known and compared
-  // against the resolved production deployment. Redirects and unassigned-but-listed domains
-  // leave verification undefined — inconclusive rather than a guess.
-  const stableDomainVerified =
-    assignment === undefined
-      ? undefined
-      : assignment.found === false || assignment.redirect
-        ? false
-        : assignment.deploymentId !== undefined
-          ? assignment.deploymentId === production.deploymentId
-          : undefined;
+  // A declared domain is the authoritative routing identity: when it resolves, the observed
+  // production deployment is the domain's own assignment by construction, so the domain is
+  // verified. When it does not resolve, the observation is unavailable and never reaches
+  // here — there is no fallback that could make verification inconclusive.
+  const stableDomainVerified = config.domain !== undefined ? true : undefined;
 
   return deploymentObservationSchema.parse({
     provider: 'vercel',
@@ -639,14 +682,29 @@ const diagnoseDeployment = async (
   );
 
   const aliases = projectPayload.data.alias ?? [];
-  const production = resolveProductionDeploymentId(aliases);
-  if (production === undefined) {
+  const production = resolveProduction(aliases, config.domain);
+  if (production.kind === 'unassigned') {
     diagnostics.push(
       diagnostic(
         'VERCEL_PRODUCTION',
         'Production deployment',
         'error',
-        'no production domain is assigned to a deployment',
+        config.domain !== undefined
+          ? `declared domain ${config.domain} is not assigned to a production deployment`
+          : 'no production domain is assigned to a deployment',
+      ),
+    );
+    return diagnostics;
+  }
+  if (production.kind === 'ambiguous') {
+    diagnostics.push(
+      diagnostic(
+        'VERCEL_PRODUCTION',
+        'Production deployment',
+        'error',
+        `ambiguous — ${production.assignments
+          .map((assignment) => `${assignment.domain} -> ${assignment.deploymentId}`)
+          .join(', ')}`,
       ),
     );
     return diagnostics;
@@ -702,23 +760,14 @@ const diagnoseDeployment = async (
   );
 
   if (config.domain !== undefined) {
-    const assignment = domainAssignment(aliases, config.domain);
-    const verified =
-      assignment.found && !assignment.redirect
-        ? assignment.deploymentId === production.deploymentId
-        : false;
+    // Reaching here means the declared domain's own production assignment resolved
+    // production — the domain is verified by construction.
     diagnostics.push(
       diagnostic(
         'VERCEL_DOMAIN',
         `Domain ${config.domain}`,
-        verified ? 'ok' : 'warning',
-        verified
-          ? 'resolves to the current production deployment'
-          : assignment.found
-            ? assignment.redirect
-              ? 'is a redirect, not a production deployment assignment'
-              : `resolves to ${assignment.deploymentId ?? 'no deployment'}`
-            : 'is not assigned to this project',
+        'ok',
+        'resolves to the current production deployment',
       ),
     );
   }
