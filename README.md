@@ -16,7 +16,11 @@ GitHub main
     v
 Vercel Production
     |
-    ?  runtime connection not yet verified
+    v  runtime SHA verified
+    |
+Running Runtime
+    |
+    v  target + read probe verified
     |
 Supabase
 ```
@@ -68,8 +72,9 @@ node packages/cli/dist/index.js check --config deploytruth.yml --environment pro
 ```
 
 `doctor` validates configuration and provider access. `check` compares local Git, authoritative
-GitHub source, Vercel production deployment, Supabase project/database identity, and committed
-migration history. Output is PASS, WARN, or FAIL with evidence-backed findings.
+GitHub source, Vercel production deployment, fresh runtime attestation, runtime Supabase target and
+connectivity, Supabase project/database identity, and committed migration history. Output is PASS,
+WARN, or FAIL with evidence-backed findings.
 
 ## Security model
 
@@ -86,9 +91,11 @@ vulnerabilities and [`docs/security.md`](docs/security.md) for the implementatio
 | GitHub    | Repository metadata and authoritative branch HEAD                         |
 | Vercel    | Production deployment, serving aliases, state, and source commit          |
 | Supabase  | Project access, database identity, and applied migration history          |
+| Runtime   | Fresh SHA/environment attestation, env presence, and live DB connection   |
 
-Runtime configuration and the Vercel-to-Supabase connection are intentionally not verified yet.
-See the [live acceptance environment](docs/live-acceptance.md) for the controlled dogfood target.
+See [runtime connection truth](docs/runtime-truth.md) and the
+[live acceptance environment](docs/live-acceptance.md) for the protocol and controlled dogfood
+target.
 
 ## Repository layout
 
@@ -103,9 +110,8 @@ See the [live acceptance environment](docs/live-acceptance.md) for the controlle
 
 ## Roadmap
 
-- M1–M4: local Git, GitHub, Vercel, Supabase identity, and migration truth — implemented.
-- M5: prove deployed runtime configuration points to the intended database without exposing
-  secret values.
+- M1–M5: local Git, GitHub, Vercel, Supabase identity/migrations, and fresh runtime connection
+  truth — implemented.
 - Later: expand provider coverage and harden the pre-1.0 CLI based on real-world use.
 
 DeployTruth is not yet published to npm and does not claim production maturity.

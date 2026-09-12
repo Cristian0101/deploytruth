@@ -11,31 +11,40 @@ DeployTruth backend.
 ```text
 DeployTruth Repository / GitHub
           |
-          | observed
+          | source and deployment evidence
           v
 Vercel Live Acceptance
-
-          ?  runtime connection truth not implemented yet
-
-Supabase Live Acceptance
           |
-          | observed independently
+          | fresh public runtime attestation
           v
-Migration History
+Runtime endpoint
+          |
+          | URL-derived identity + harmless GET probe
+          v
+Supabase Live Acceptance
+
+Immutable Git migration catalog --> Supabase migration history
 ```
 
-The Vercel project may hold Supabase-related environment configuration for future M5 acceptance,
-but M4 does not inspect or prove that runtime relationship.
+The two edges are intentionally separate. Vercel proves which source commit it deployed; the
+runtime endpoint proves what that running application sees and whether it can reach the declared
+Supabase project. M4's independent database proof remains useful but cannot substitute for either
+runtime edge.
 
 ## Fixture
 
 - App: `examples/live-acceptance`
-- Safe runtime endpoint: `GET /api/version`
+- Runtime attestation endpoint: `GET /api/deploytruth/runtime?nonce=<fresh>`
+- Compatibility endpoint retained from M4: `GET /api/version`
 - Migration catalog: `examples/live-acceptance/supabase/migrations`
 - Manifest: `examples/live-acceptance/deploytruth.yml`
 
-The version endpoint returns only the Vercel-provided source commit and environment label. It does
-not read the database or serialize environment configuration.
+The runtime endpoint returns protocol version 1, the exact request nonce, the Vercel-provided
+source commit and environment label, presence-only booleans for the application allowlist, and a
+normalized Supabase connection result. It derives the project ref from `SUPABASE_URL` and performs
+one GET to `/auth/v1/settings` with `SUPABASE_PUBLISHABLE_KEY`; it discards that response body. It
+never returns environment values, credentials, arbitrary environment keys, raw errors, or provider
+responses.
 
 ## Running DeployTruth
 
@@ -57,18 +66,22 @@ If the local Node trust store does not already include Supabase's CA, download t
 the acceptance project's Database settings and set `NODE_EXTRA_CA_CERTS` to that local certificate
 path. Keep certificate verification enabled.
 
-Never place their values in the manifest, documentation, reports, or Git.
+The deployed Preview and Production runtime also require `SUPABASE_URL` and
+`SUPABASE_PUBLISHABLE_KEY`. Those are application runtime settings, not local DeployTruth
+credentials. Never place their values in the manifest, documentation, reports, or Git.
 
-## Expected M4 checks
+## Expected M5 checks
 
 - GitHub authoritative `main` SHA is observed.
 - Vercel production is READY and its source SHA matches GitHub `main`.
 - The declared Supabase project is accessible.
 - The PostgreSQL connection identifies the declared project.
 - The committed migration versions exactly match Supabase migration history.
-
-Runtime identity, environment-variable comparison, and the Vercel runtime → Supabase relationship
-remain expected UNKNOWN/WARN evidence until M5.
+- A fresh runtime nonce is echoed under `Cache-Control: no-store`.
+- The runtime SHA exactly matches the observed Vercel deployment SHA.
+- The runtime environment matches the Vercel deployment target.
+- Every required runtime variable is present according to presence-only evidence.
+- The runtime derives the declared Supabase ref from its actual URL and its harmless probe connects.
 
 ## Live identities
 
@@ -84,7 +97,7 @@ remain expected UNKNOWN/WARN evidence until M5.
 These identifiers are safe to commit. Provider tokens, the database password, and the database URL
 remain only in the ignored local credential file.
 
-The Vercel production environment is configured with `SUPABASE_URL` and `SUPABASE_PROJECT_REF`.
-DeployTruth M4 observes Vercel and Supabase independently; it does not read those deployment
-variables or claim that the running application uses the intended Supabase project. That edge is
-the exact subject of M5.
+The Vercel Preview and Production environments are configured with `SUPABASE_URL` and
+`SUPABASE_PUBLISHABLE_KEY`. `SUPABASE_PROJECT_REF` is not runtime identity evidence and the
+attestation endpoint deliberately ignores it. The ref must be derived from the URL the application
+actually uses.

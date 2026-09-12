@@ -20,7 +20,7 @@ environments:
       migrations:
         directory: examples/live-acceptance/supabase/migrations
     runtime:
-      url: https://example-app.example.com/api/version
+      url: https://example-app.example.com/api/deploytruth/runtime
       expected_environment: production
     required_environment_variables:
       - SUPABASE_URL

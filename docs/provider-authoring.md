@@ -113,6 +113,26 @@ The expected-migration catalog is a separate provider (`git-migrations`) that re
 Git object tree via `git ls-tree`, not the working-tree filesystem. Adapters report which commit
 the catalog came from (`sourceSha`); whether that commit is authoritative is a rule decision.
 
+## Runtime attestation adapters
+
+Runtime adapters observe a deliberately small public endpoint implemented by the deployed
+application. They are not provider-control-plane adapters and must use the dedicated runtime
+transport rather than the generic provider transport. The transport contract is deliberately
+narrow:
+
+- one `GET` with a fresh cryptographic nonce;
+- HTTPS, except loopback HTTP for local tests;
+- manual redirects, with every redirect rejected;
+- `application/json` only and a 16 KiB maximum response;
+- strict versioned schema parsing; and
+- normalized errors that discard raw bodies, URLs, headers, and transport exceptions.
+
+The adapter may retain only environment-variable presence booleans for names already declared by
+the application manifest. It must reject or discard undeclared keys. Runtime database identity must
+come from a URL-derived project identifier and a harmless application-owned connectivity probe;
+deployment configuration or an independently reachable database cannot substitute for runtime
+evidence. See ADR 007 and `runtime-truth.md` for the complete public contract.
+
 ## What not to do
 
 - Do not export SDK response types.

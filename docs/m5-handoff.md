@@ -1,7 +1,7 @@
 # M5 handoff
 
-This handoff describes the isolated live-acceptance system established after M4. It contains no
-credentials.
+This handoff describes the isolated live-acceptance system extended for M5. It contains no
+credentials or runtime configuration values.
 
 ## Certified source
 
@@ -38,18 +38,19 @@ credentials.
 - GitHub `main` ↔ Vercel production source SHA
 - Declared Supabase project ↔ inspected database identity
 - Immutable Git-tree migration catalog ↔ applied Supabase migration history
+- Vercel deployment source SHA ↔ fresh runtime-attested SHA
+- Vercel deployment target ↔ fresh runtime-attested environment
+- Runtime allowlisted variable names ↔ presence-only evidence
+- Runtime URL-derived project ref ↔ declared Supabase project
+- Runtime application process ↔ harmless Supabase Auth settings GET
 
-## Remaining unverified relationship
+## Runtime proof shape
 
 ```text
-Vercel runtime environment
-            ?
-            v
-Supabase project
+Vercel deployment --> runtime attestation --> Supabase project
 ```
 
-The Vercel project contains Supabase-related environment configuration, but M4 neither reads its
-values nor proves that the deployed runtime uses the intended project.
-
-M5's exact mission is to prove the runtime/configuration relationship between the deployed Vercel
-environment and the intended Supabase project without serializing secret values.
+The runtime endpoint is public, versioned, nonce-bound, no-store, GET-only, and capped at 16 KiB.
+It exposes only allowlisted presence booleans and normalized identity/connectivity facts. It ignores
+`SUPABASE_PROJECT_REF`, derives identity from the configured URL, and uses only a publishable key.
+M4's direct database connection remains an independent proof boundary and cannot satisfy M5.

@@ -60,6 +60,10 @@ The engine works with three models:
 | Applied migration versions     | `database.appliedMigrationIds`                 |
 | Migration-history readability  | `database.migrationHistory`                    |
 | Expected migration source      | `repositoryMigrations` (`sourceSha`, `origin`) |
+| Runtime attestation state      | `runtime.availability`, `.freshness`           |
+| Runtime source/environment     | `runtime.commitSha`, `.environment`            |
+| Runtime variable presence      | `runtime.environmentVariables`                 |
+| Runtime database target/probe  | `runtime.databaseConnection`                   |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
 are discarded after translation.
@@ -171,10 +175,24 @@ and finding codes. The web app can later map these to React Flow without changin
 runs final recursive sanitization, then writes a timestamped report and
 `.deploytruth/reports/latest.json`. No historical database is introduced in v0.1.
 
-The optional runtime endpoint contains only commit, environment, and build time:
+The runtime endpoint implements the strict public-safe M5 attestation protocol:
 
 ```json
-{ "commit": "d7f8ff5", "environment": "production", "buildTime": "2026-09-10T18:24:00Z" }
+{
+  "version": 1,
+  "nonce": "<echo>",
+  "commit": "d7f8ff5",
+  "environment": "production",
+  "environmentVariables": { "SUPABASE_URL": true },
+  "connections": {
+    "database": {
+      "provider": "supabase",
+      "targetProjectRef": "prodabc123",
+      "identity": "verified",
+      "status": "connected"
+    }
+  }
+}
 ```
 
 ## Risks and mitigations
@@ -204,5 +222,7 @@ ADR 005). M4 (current) adds Supabase database and migration truth through
 `packages/providers/src/supabase/` plus the `git ls-tree` migration catalog in
 `packages/providers/src/git/migrations.ts` — a GET-only Management API adapter, a two-method
 read-only PostgreSQL reader, and identity-gated comparison (`docs/supabase-truth.md`, ADR 006).
-M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the local
-topology UI, and M9 the action. Every adapter milestone starts with fixtures.
+M5 adds fresh runtime identity, presence-only environment evidence, URL-derived Supabase target
+identity, a harmless live connection probe, and distinct deployment-to-runtime and
+runtime-to-database topology edges (`docs/runtime-truth.md`, ADR 007). Later work can build the
+visual truth map from these core-owned edges. Every adapter milestone starts with fixtures.
