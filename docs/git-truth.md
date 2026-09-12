@@ -93,7 +93,12 @@ SOURCE
   Ahead / behind       0 / 0
 
 DEPLOYMENT
-  vercel               NOT CHECKED (adapter not implemented)
+  Vercel
+    Project            example
+    Target             production
+    Deployment         dpl_abc123
+    State              READY
+    Source SHA         c6797ac
 
 FINDINGS
   [WARN/WARNING] DIRTY_WORKTREE — Local worktree has uncommitted changes

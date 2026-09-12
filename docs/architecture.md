@@ -47,14 +47,22 @@ The engine works with three models:
 | GitHub branch SHA             | `remoteSource.remoteHeadSha`                   |
 | GitHub default branch         | `remoteSource.defaultBranch`                   |
 | Remote observability          | `remoteSource.availability`                    |
+| Production deployment id/URL  | `deployment.deploymentId`, `.deploymentUrl`    |
+| Deployment state              | `deployment.state` (ready/building/queued/…)   |
+| Deployment source commit      | `deployment.commitSha`, `.sourceBranch`        |
+| Deployment observability      | `deployment.availability`                      |
+| Stable domain verification    | `deployment.stableDomainVerified`              |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
 are discarded after translation.
 
 An environment's source evidence is a **pair**: `source` is the local observation (`git`
 adapter), `remoteSource` is the remote-authoritative observation (`github` adapter). They are
-never merged — rules compare the two claims (ADR 004). Remote adapters always set `availability`,
-so a failed API call produces `unavailable` evidence rather than fabricated truth.
+never merged — rules compare the two claims (ADR 004). Deployment evidence is the separate
+`deployment` observation (`vercel` adapter in M3), which identifies the deployment currently
+serving production through provider control-plane assignments — never "the newest deployment"
+(ADR 005). Remote adapters always set `availability`, so a failed API call produces
+`unavailable` evidence rather than fabricated truth.
 
 ## Manifest
 
@@ -67,7 +75,7 @@ environments:
   production:
     kind: production
     source: { provider: github, repository: owner/my-app, branch: main }
-    deployment: { provider: vercel, project: my-app }
+    deployment: { provider: vercel, project: my-app, target: production, domain: app.example.com }
     database: { provider: supabase, project_ref: prod-ref }
     runtime: { url: https://example.com/api/version, expected_environment: production }
     required_environment_variables: [SUPABASE_URL]
@@ -105,6 +113,12 @@ The foundation includes:
 - `GITHUB_REPOSITORY_UNAVAILABLE` -> warning
 - `GITHUB_BRANCH_UNAVAILABLE` -> warning
 - `DEPLOYMENT_SHA_MISMATCH` -> fail
+- `DEPLOYMENT_SOURCE_UNVERIFIED` -> warning
+- `VERCEL_PROJECT_UNAVAILABLE` -> warning
+- `VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE` -> warning
+- `DEPLOYMENT_NOT_READY` -> warning
+- `DEPLOYMENT_FAILED` -> fail
+- `STABLE_DOMAIN_STALE` -> fail when positively stale, warning when inconclusive
 - `WRONG_DATABASE_PROJECT` -> fail
 - `PREVIEW_USES_PRODUCTION_DATABASE` -> critical fail
 - `DATABASE_MIGRATIONS_BEHIND` -> fail
@@ -153,6 +167,9 @@ M0 is the foundation. M1 adds local Git observations through `packages/providers
 — an allowlisted, read-only `GitRunner` plus a `local-git` adapter producing `SourceObservation`
 (`docs/git-truth.md` covers semantics). M2 (current) adds remote-authoritative GitHub truth
 through `packages/providers/src/github/` — a GET-only REST transport plus a `github` adapter
-producing the `remoteSource` observation (`docs/github-truth.md`, ADR 004). M3 Vercel, M4
-Supabase, M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the
-local topology UI, and M9 the action. Every adapter milestone starts with fixtures.
+producing the `remoteSource` observation (`docs/github-truth.md`, ADR 004). M3 (current) adds
+Vercel production deployment truth through `packages/providers/src/vercel/` — a GET-only REST
+transport plus a `vercel` adapter producing the `deployment` observation (`docs/vercel-truth.md`,
+ADR 005). M4 Supabase, M5 wires production rule selection, M6 makes `check` live, M7 runtime
+identity, M8 the local topology UI, and M9 the action. Every adapter milestone starts with
+fixtures.

@@ -81,6 +81,18 @@ observed, `unavailable` with a normalized `reason` otherwise. An unavailable obs
 correct output of a failed call; returning fabricated or partial truth is not. Credentials belong
 inside the transport closure, never in adapter config or observations.
 
+## Deployment adapters
+
+Deployment adapters (the `vercel` adapter is the model) produce the `deployment` observation.
+The same honesty rules apply, with two additions:
+
+- "Current production" must come from the provider's routing/assignment evidence (for Vercel,
+  the project's production domain aliases — ADR 005), never from "the newest deployment".
+- The deployment's source commit (`commitSha`) must come from provider-recorded deployment
+  metadata (for Vercel, `meta.githubCommitSha`/`gitSource.sha`), never inferred from ids, URLs,
+  or timestamps. If the provider cannot prove it, leave `commitSha` unset so the report shows
+  `DEPLOYMENT_SOURCE_UNVERIFIED` instead of a fabricated match.
+
 ## What not to do
 
 - Do not export SDK response types.

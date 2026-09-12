@@ -79,8 +79,27 @@ token produces `unavailable` evidence, not fabricated truth.
 Error normalization never echoes request internals: status codes map to fixed `reason` strings
 (`not_found`, `unauthorized`, `forbidden`, `rate_limited`, `server_error`, `unexpected_status`,
 `malformed_response`, `network_error`, `timeout`, `aborted`) with fixed detail text. Rate-limit
-metadata is limited to `limit`, `remaining`, and `resetAt` — raw response headers are never
-copied into observations.
+metadata is limited to `limit`, `remaining`, `resetAt`, and `retryAfter` — raw response headers
+are never copied into observations.
+
+## Vercel API access
+
+The Vercel adapter reaches `api.vercel.com` through `createVercelTransport`, built on the same
+GET-only `createReadOnlyFetchTransport` — the contract type exposes no other verb and no
+mutation-capable Vercel code exists in the runtime path. Project identity is declared in the
+manifest (`project`, optional `scope`, optional `domain`); nothing is inferred from Git remotes.
+
+Tokens resolve from `DEPLOYTRUTH_VERCEL_TOKEN` then `VERCEL_TOKEN` at observation time, are held
+inside the transport closure, and become an `Authorization` header on the wire only. Vercel
+exposes no anonymous project truth: without a credential the adapter returns `unavailable`
+(`missing_credentials`) evidence, never a guess. `doctor` reports `available`/`none` plus the
+variable _name_ — never the value.
+
+The adapter requests project metadata and the current production deployment only. It never reads
+deployment environment-variable values, build logs, or source files; if such fields are
+incidentally present in a response they are dropped during normalization (tests assert
+sentinel-shaped env material never survives). Error normalization mirrors the GitHub model plus
+`missing_credentials` and `deployment_unavailable`, and adds the `retryAfter` seconds hint.
 
 ## Local UI and storage
 
