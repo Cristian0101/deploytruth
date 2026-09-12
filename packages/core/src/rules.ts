@@ -994,6 +994,12 @@ const supabaseUnavailableEvidence = (
   ...(availability !== undefined && 'detail' in availability && availability.detail !== undefined
     ? { detail: availability.detail }
     : {}),
+  // Endpoint-derived target evidence, clearly labeled: never an observed identity claim.
+  ...(availability !== undefined &&
+  'targetProjectRef' in availability &&
+  availability.targetProjectRef !== undefined
+    ? { connectionTargetRef: availability.targetProjectRef }
+    : {}),
   ...(availability !== undefined &&
   'rateLimit' in availability &&
   availability.rateLimit?.resetAt !== undefined
@@ -1325,6 +1331,11 @@ const migrationComparisonReady = (
   if (database === undefined) {
     return false;
   }
+  // A failed or refused connection can never back a certified comparison — even if other
+  // fields claim success, inconsistent evidence is not certification material.
+  if (database.connection !== undefined && database.connection.state !== 'available') {
+    return false;
+  }
   if (database.identity !== undefined && database.identity !== 'verified') {
     return false;
   }
@@ -1538,6 +1549,9 @@ const checkCoverage = (
       // migration history. Pre-M4 observations carry none of these fields and keep
       // their original semantics.
       if (migrationSourceState(environment, observation).state !== 'authoritative') {
+        return false;
+      }
+      if (database.connection !== undefined && database.connection.state !== 'available') {
         return false;
       }
       if (database.identity !== undefined && database.identity !== 'verified') {

@@ -214,6 +214,9 @@ describe('database connection identity', () => {
     expect(observation.connection?.state).toBe('available');
     expect(observation.observedProjectRef).toBe(REF);
     expect(observation.identity).toBe('verified');
+    // The endpoint-derived target is serialized as connection-target evidence, distinct
+    // from the observed identity claim.
+    expect(observation.connection?.targetProjectRef).toBe(REF);
   });
 
   it('reports mismatch when the connection endpoint resolves to another project', async () => {
@@ -241,7 +244,11 @@ describe('database connection identity', () => {
       ]),
       databaseReaderFactory: () =>
         createFakeDatabaseReader({
-          identity: { observedProjectRef: undefined, identitySource: undefined },
+          identity: {
+            observedProjectRef: undefined,
+            targetProjectRef: undefined,
+            identitySource: undefined,
+          },
         }),
     });
 
@@ -286,6 +293,7 @@ describe('database connection identity', () => {
             state: 'unavailable',
             reason: 'authentication_failed',
             observedProjectRef: undefined,
+            targetProjectRef: undefined,
             identitySource: undefined,
           },
         }),
@@ -301,6 +309,95 @@ describe('database connection identity', () => {
     expect(observation.migrationHistory?.reason).toBe('connection_unavailable');
   });
 
+  it('a correct-looking URL with a failed connection is never reported as observed identity', async () => {
+    const provider = providerWith({
+      transport: createStubTransport([
+        { match: '/v1/projects/', status: 200, body: projectPayload },
+      ]),
+      databaseReaderFactory: () =>
+        createFakeDatabaseReader({
+          identity: {
+            state: 'unavailable',
+            reason: 'connection_failed',
+            observedProjectRef: undefined,
+            targetProjectRef: REF,
+            identitySource: 'direct_host',
+          },
+        }),
+    });
+
+    const observation = await observe(provider);
+
+    expect(observation.connection).toMatchObject({
+      state: 'unavailable',
+      reason: 'connection_failed',
+      targetProjectRef: REF,
+    });
+    expect(observation.observedProjectRef).toBeUndefined();
+    expect(observation.identity).toBeUndefined();
+  });
+
+  it('a failed connection to a mistargeted URL reports target evidence, not observed identity', async () => {
+    const provider = providerWith({
+      transport: createStubTransport([
+        { match: '/v1/projects/', status: 200, body: projectPayload },
+      ]),
+      databaseReaderFactory: () =>
+        createFakeDatabaseReader({
+          identity: {
+            state: 'unavailable',
+            reason: 'tls_error',
+            observedProjectRef: undefined,
+            targetProjectRef: OTHER_REF,
+            identitySource: 'direct_host',
+          },
+        }),
+    });
+
+    const observation = await observe(provider);
+
+    // The URL-derived target is labeled connection-target evidence; no database was ever
+    // observed, so there is no observed ref and no identity verdict.
+    expect(observation.connection).toMatchObject({
+      state: 'unavailable',
+      reason: 'tls_error',
+      targetProjectRef: OTHER_REF,
+    });
+    expect(observation.observedProjectRef).toBeUndefined();
+    expect(observation.identity).toBeUndefined();
+    expect(observation.migrationHistory?.reason).toBe('connection_unavailable');
+  });
+
+  it('surfaces a refused insecure TLS configuration as unavailable connection evidence', async () => {
+    const provider = providerWith({
+      transport: createStubTransport([
+        { match: '/v1/projects/', status: 200, body: projectPayload },
+      ]),
+      databaseReaderFactory: () =>
+        createFakeDatabaseReader({
+          identity: {
+            state: 'unavailable',
+            reason: 'insecure_tls_configuration',
+            detail:
+              'The database URL requests a TLS configuration that cannot authenticate the endpoint.',
+            observedProjectRef: undefined,
+            targetProjectRef: REF,
+            identitySource: 'direct_host',
+          },
+        }),
+    });
+
+    const observation = await observe(provider);
+
+    expect(observation.connection).toMatchObject({
+      state: 'unavailable',
+      reason: 'insecure_tls_configuration',
+      targetProjectRef: REF,
+    });
+    expect(observation.observedProjectRef).toBeUndefined();
+    expect(observation.identity).toBeUndefined();
+  });
+
   it('still records migration history when identity is unverified, as diagnostic evidence', async () => {
     const provider = providerWith({
       transport: createStubTransport([
@@ -308,7 +405,11 @@ describe('database connection identity', () => {
       ]),
       databaseReaderFactory: () =>
         createFakeDatabaseReader({
-          identity: { observedProjectRef: undefined, identitySource: undefined },
+          identity: {
+            observedProjectRef: undefined,
+            targetProjectRef: undefined,
+            identitySource: undefined,
+          },
           history: { state: 'available', appliedVersions: ['20240101000000'] },
         }),
     });
@@ -414,5 +515,41 @@ describe('supabase provider diagnose', () => {
     const identity = diagnostics?.find((entry) => entry.code === 'SUPABASE_DATABASE_IDENTITY');
     expect(identity?.status).toBe('error');
     expect(identity?.message).toContain(OTHER_REF);
+  });
+
+  it('reports the endpoint-derived target on a failed connection without claiming an observation', async () => {
+    const provider = providerWith({
+      transport: createStubTransport([
+        { match: '/v1/projects/', status: 200, body: projectPayload },
+      ]),
+      databaseReaderFactory: () =>
+        createFakeDatabaseReader({
+          identity: {
+            state: 'unavailable',
+            reason: 'connection_failed',
+            observedProjectRef: undefined,
+            targetProjectRef: OTHER_REF,
+            identitySource: 'direct_host',
+          },
+        }),
+    });
+    const config = provider.validateConfig({ projectRef: REF });
+
+    const diagnostics = await provider.diagnose?.({
+      project: 'meridia',
+      environment: 'production',
+      config,
+    });
+
+    const connection = diagnostics?.find((entry) => entry.code === 'SUPABASE_DATABASE_CONNECTION');
+    const target = diagnostics?.find((entry) => entry.code === 'SUPABASE_DATABASE_TARGET');
+    const identity = diagnostics?.find((entry) => entry.code === 'SUPABASE_DATABASE_IDENTITY');
+
+    expect(connection?.status).toBe('error');
+    expect(target?.status).toBe('error');
+    expect(target?.message).toContain(OTHER_REF);
+    expect(target?.message).toContain('not an observed identity');
+    // A failed connection produces no identity verdict at all.
+    expect(identity).toBeUndefined();
   });
 });

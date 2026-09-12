@@ -108,6 +108,16 @@ describe('architectural boundaries', () => {
     expect(reader).toContain('readMigrationHistory');
   });
 
+  it('keeps verified TLS as the only PostgreSQL runtime posture', () => {
+    const reader = read('packages/providers/src/supabase/database-reader.ts');
+
+    // DeployTruth fails closed: no runtime path may weaken or disable certificate
+    // verification, and no insecure fallback may exist.
+    expect(reader).not.toMatch(/rejectUnauthorized\s*:\s*false/);
+    expect(reader).toContain('rejectUnauthorized: true');
+    expect(reader).not.toMatch(/checkServerIdentity\s*[:=]/);
+  });
+
   it('keeps raw Supabase concerns out of core', () => {
     const source = [
       read('packages/core/src/domain.ts'),

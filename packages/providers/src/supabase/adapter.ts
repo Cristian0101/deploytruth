@@ -313,6 +313,14 @@ const observeDatabase = async (
         state: 'unavailable',
         reason: identityResult.reason ?? 'connection_failed',
         ...(identityResult.detail !== undefined ? { detail: identityResult.detail } : {}),
+        // The endpoint-derived target stays visible as configuration evidence — it is not
+        // observed database identity, and `observedProjectRef` stays absent.
+        ...(identityResult.targetProjectRef !== undefined
+          ? { targetProjectRef: identityResult.targetProjectRef }
+          : {}),
+        ...(identityResult.identitySource !== undefined
+          ? { identitySource: identityResult.identitySource }
+          : {}),
       },
       appliedMigrationIds: [],
       migrationHistory: {
@@ -341,6 +349,9 @@ const observeDatabase = async (
       state: 'available',
       ...(identityResult.identitySource !== undefined
         ? { identitySource: identityResult.identitySource }
+        : {}),
+      ...(identityResult.targetProjectRef !== undefined
+        ? { targetProjectRef: identityResult.targetProjectRef }
         : {}),
     },
     ...(observedProjectRef !== undefined ? { observedProjectRef } : {}),
@@ -462,6 +473,18 @@ const diagnoseDatabase = async (
         identity.detail ?? 'unreachable',
       ),
     );
+    if (identity.targetProjectRef !== undefined) {
+      diagnostics.push(
+        diagnostic(
+          'SUPABASE_DATABASE_TARGET',
+          'Connection target',
+          identity.targetProjectRef === config.projectRef ? 'ok' : 'error',
+          identity.targetProjectRef === config.projectRef
+            ? `endpoint-derived target is ${identity.targetProjectRef} — configuration evidence, not an observed identity`
+            : `endpoint-derived target is ${identity.targetProjectRef}, not declared ${config.projectRef} — configuration evidence, not an observed identity`,
+        ),
+      );
+    }
     return diagnostics;
   }
   diagnostics.push(

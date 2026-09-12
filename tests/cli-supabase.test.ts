@@ -208,6 +208,44 @@ describe('deploytruth check with Supabase', () => {
     expect(finding?.observed).toBe('directory_missing');
   });
 
+  it('reports a refused insecure TLS configuration without claiming identity or migrations', async () => {
+    const { dir, head } = baseRepo();
+
+    const execution = await runEnvironmentCheck({
+      configPath: manifestAt(dir),
+      environmentName: 'production',
+      githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+      supabaseProvider: createFixtureSupabaseProvider({
+        connection: {
+          state: 'unavailable',
+          reason: 'insecure_tls_configuration',
+          detail:
+            'The database URL requests a TLS configuration that cannot authenticate the endpoint; DeployTruth only connects over certificate-verified TLS.',
+          targetProjectRef: REF,
+          identitySource: 'direct_host',
+        },
+        migrationHistory: { state: 'unavailable', reason: 'connection_unavailable' },
+      }),
+    });
+
+    const database = execution.report.environments[0]?.observation?.database;
+    expect(database?.connection?.reason).toBe('insecure_tls_configuration');
+    expect(database?.identity).toBeUndefined();
+    expect(database?.observedProjectRef).toBeUndefined();
+
+    const codes = execution.report.findings.map((finding) => finding.code);
+    expect(codes).toContain('DATABASE_CONNECTION_UNAVAILABLE');
+    expect(codes).toContain('REQUIRED_OBSERVATION_UNAVAILABLE');
+    expect(execution.report.verdict).not.toBe('PASS');
+
+    const output = formatCheckReport(execution);
+    expect(output).toContain('UNAVAILABLE');
+    expect(output).toContain('Connection target');
+    expect(output).toContain('endpoint-derived — not an observed identity');
+    expect(output).toContain('NOT OBSERVED');
+    expect(output).not.toContain('MIGRATIONS VERIFIED');
+  });
+
   it('serializes no credential material from the database evidence path', async () => {
     const { dir, head } = baseRepo();
 

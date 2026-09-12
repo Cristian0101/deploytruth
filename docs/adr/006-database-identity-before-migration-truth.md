@@ -57,6 +57,30 @@ Verifying which database a Vercel deployment actually talks to requires deployme
 DeployTruth does not collect yet; the edge is reported as declared/unverified rather than
 fabricated.
 
+### Amendment (M4.1): TLS fails closed, and target ≠ observed identity
+
+Two hardening decisions sharpen the evidence chain before merge:
+
+1. **TLS is verified or refused.** The earlier posture disabled certificate verification when
+   the URL carried no `sslmode`, trading endpoint authenticity for connectivity — unacceptable
+   for a tool that may hold production credentials. The driver is no longer trusted with TLS
+   directives at all: `pg-connection-string` gives URL params precedence over explicit client
+   options (several map to unverified TLS), so the reader strips every `ssl*` directive and
+   `uselibpqcompat` from the connection string and always sets
+   `ssl: { rejectUnauthorized: true }`. Absent `sslmode` means verified TLS; `require`,
+   `verify-ca`, and `verify-full` all resolve to `verify-full`-equivalent semantics
+   (deliberately stricter than libpq); `disable`/`allow`/`prefer`/`no-verify`, unknown modes,
+   `uselibpqcompat`, and URL-borne certificate material fail closed as
+   `insecure_tls_configuration` with no connection attempt. Custom CAs live in the Node trust
+   store (`NODE_EXTRA_CA_CERTS`), never in the URL or the manifest. There is no insecure
+   escape hatch.
+2. **Connection target is not observed identity.** The endpoint-derived ref now has two
+   distinct representations: `connection.targetProjectRef` (configuration evidence — where the
+   URL points, present even on failure) and `observedProjectRef` (observed identity — emitted
+   only after a TLS-authenticated session succeeded). A failed connection therefore cannot
+   produce `WRONG_DATABASE_PROJECT`, a verified identity, or certified migration history; it
+   reports `DATABASE_CONNECTION_UNAVAILABLE` plus labeled target evidence.
+
 ## Consequences
 
 - `MIGRATIONS VERIFIED` requires the full chain: authoritative source tree, reachable connection,

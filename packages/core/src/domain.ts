@@ -396,6 +396,7 @@ export const databaseUnavailableReasonSchema = z.enum([
   'authentication_failed',
   'connection_failed',
   'tls_error',
+  'insecure_tls_configuration',
   'database_unavailable',
 ]);
 export type DatabaseUnavailableReason = z.infer<typeof databaseUnavailableReasonSchema>;
@@ -433,8 +434,10 @@ export type DatabaseControlPlane = z.infer<typeof databaseControlPlaneSchema>;
 
 /**
  * Database connection evidence: whether the configured PostgreSQL endpoint accepted a
- * read-only session. `identitySource` records _how_ the observed project ref was derived
- * from the connection endpoint — never the connection string itself.
+ * read-only, TLS-authenticated session. `identitySource` records _how_ an endpoint-derived
+ * project ref was recovered from the connection endpoint — never the connection string
+ * itself. `targetProjectRef` is connection-target configuration evidence: it may be present
+ * even when the connection failed, and it is never observed database identity.
  */
 export const databaseConnectionStateSchema = z
   .object({
@@ -443,6 +446,14 @@ export const databaseConnectionStateSchema = z
     /** Sanitized human detail; must never contain host credentials or driver errors. */
     detail: z.string().min(1).optional(),
     identitySource: z.enum(['direct_host', 'pooler_username']).optional(),
+    /**
+     * The project ref the configured connection endpoint *targets*, derived deterministically
+     * from the endpoint's documented encoding. Present whenever derivable — including on a
+     * failed or refused connection — so findings can report where the URL points. This is
+     * configuration evidence only; `observedProjectRef` is the observed identity claim and is
+     * emitted solely after a TLS-authenticated session actually succeeded.
+     */
+    targetProjectRef: z.string().min(1).optional(),
   })
   .strict();
 export type DatabaseConnectionState = z.infer<typeof databaseConnectionStateSchema>;
@@ -481,7 +492,12 @@ export const databaseObservationSchema = z
     projectRef: z.string().min(1).optional(),
     controlPlane: databaseControlPlaneSchema.optional(),
     connection: databaseConnectionStateSchema.optional(),
-    /** Project ref established by the connection endpoint itself, when determinable. */
+    /**
+     * The connected database's project identity: the endpoint-derived ref, emitted only
+     * after a TLS-authenticated session actually succeeded. Never populated from a failed
+     * or refused connection — `connection.targetProjectRef` carries endpoint-derived
+     * target evidence, which is not observed identity.
+     */
     observedProjectRef: z.string().min(1).optional(),
     /**
      * Whether the observed connection is provably the declared project. Set only when a

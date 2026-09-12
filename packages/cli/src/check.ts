@@ -722,6 +722,14 @@ const formatSupabaseSection = (
         `UNAVAILABLE — ${connection?.detail ?? connection?.reason ?? 'not observed'}`,
       ),
     );
+    if (connection?.targetProjectRef !== undefined) {
+      lines.push(
+        subRow(
+          'Connection target',
+          `${connection.targetProjectRef} (endpoint-derived — not an observed identity)`,
+        ),
+      );
+    }
     lines.push(subRow('Database identity', 'NOT OBSERVED'));
   }
 

@@ -126,6 +126,23 @@ statements inside `START TRANSACTION READ ONLY` … `ROLLBACK` blocks, additiona
 repairs history. Driver and network errors normalize to fixed reasons; raw messages, the URL,
 and its credentials never appear in observations, diagnostics, findings, or reports.
 
+The session is TLS-authenticated or it does not happen. Because `pg-connection-string` lets URL
+parameters override explicit client options — several of which disable peer verification — the
+reader strips every `ssl*` directive and `uselibpqcompat` from the connection string and sets
+`ssl: { rejectUnauthorized: true }` itself: certificate chain and hostname are always verified
+against the Node trust store (`verify-full`-equivalent). A missing `sslmode` therefore means
+verified TLS, and any directive that could produce plaintext or unverified TLS — the `disable`,
+`allow`, `prefer`, or `no-verify` sslmodes, unknown values, `uselibpqcompat`, or URL-borne
+certificate material — fails closed as `insecure_tls_configuration` before a connection is
+attempted. Custom CAs come from `NODE_EXTRA_CA_CERTS`; certificate contents are never read from
+the URL and never accepted through `deploytruth.yml`. There is no insecure fallback and no
+opt-out.
+
+Connection identity is reported honestly: `connection.targetProjectRef` records which project
+the endpoint-derived URL _targets_ (configuration evidence, present even on failure), while
+`observedProjectRef` is emitted only after a verified session succeeded — a failed or refused
+connection never fabricates an observed database identity.
+
 ## Local UI and storage
 
 The Vite development server is explicitly bound to `127.0.0.1`. Local reports are written only to

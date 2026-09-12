@@ -1,10 +1,12 @@
 import {
+  buildPgClientConfig,
   createPgDatabaseReader,
   deriveProjectIdentity,
   normalizeDatabaseError,
   parseMigrationRows,
   resolveSupabaseDatabaseCredential,
   resolveSupabaseManagementCredential,
+  resolveTlsPolicy,
 } from '@deploytruth/providers';
 import { describe, expect, it } from 'vitest';
 
@@ -233,6 +235,219 @@ describe('createPgDatabaseReader with an injected client', () => {
 
     expect(connected).toBe(false);
     expect(result.reason).toBe('invalid_url');
+  });
+});
+
+describe('TLS policy', () => {
+  it('enables certificate verification when the URL carries no sslmode', () => {
+    const config = buildPgClientConfig(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
+    );
+
+    expect(config.ssl).toEqual({ rejectUnauthorized: true });
+  });
+
+  it.each([
+    [
+      'direct endpoint, no directive',
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
+    ],
+    [
+      'direct endpoint, sslmode=require',
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=require`,
+    ],
+    [
+      'direct endpoint, sslmode=verify-ca',
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=verify-ca`,
+    ],
+    [
+      'direct endpoint, sslmode=verify-full',
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=verify-full`,
+    ],
+    [
+      'dedicated pooler endpoint',
+      `postgresql://postgres:pw@db.${REF}.supabase.co:6543/postgres?sslmode=require`,
+    ],
+    [
+      'shared pooler endpoint',
+      `postgresql://postgres.${REF}:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres`,
+    ],
+    [
+      'shared pooler endpoint, sslmode=require',
+      `postgresql://postgres.${REF}:pw@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require`,
+    ],
+    [
+      'shared pooler endpoint, sslmode=verify-full',
+      `postgresql://postgres.${REF}:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+    ],
+    ['ssl=1', `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?ssl=1`],
+    ['ssl=true', `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?ssl=true`],
+  ])('enforces verified TLS for the %s configuration', (_label, url) => {
+    expect(resolveTlsPolicy(url)).toEqual({ state: 'verified' });
+    expect(buildPgClientConfig(url).ssl).toEqual({ rejectUnauthorized: true });
+  });
+
+  it.each([
+    'sslmode=disable',
+    'sslmode=allow',
+    'sslmode=prefer',
+    'sslmode=no-verify',
+    'sslmode=bogus',
+    'sslmode=',
+    'ssl=0',
+    'ssl=false',
+    'ssl=no-verify',
+    'ssl=',
+    'uselibpqcompat=true',
+    'uselibpqcompat=true&sslmode=require',
+    'uselibpqcompat=true&sslmode=verify-full',
+    'sslrootcert=/etc/ssl/ca.pem',
+    'sslcert=/etc/ssl/client.crt',
+    'sslkey=/etc/ssl/client.key',
+    'sslcrl=/etc/ssl/revocations.crl',
+  ])('fails closed on insecure TLS directive ?%s', (directive) => {
+    const url = `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?${directive}`;
+
+    expect(resolveTlsPolicy(url)).toEqual({ state: 'insecure' });
+  });
+
+  it('strips every TLS directive before the driver parses the connection string', () => {
+    const config = buildPgClientConfig(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=require&uselibpqcompat=false&sslrootcert=/tmp/ca.pem&keepalives=1`,
+    );
+
+    expect(config.connectionString).not.toMatch(
+      /sslmode|uselibpqcompat|sslrootcert|sslcert|sslkey|sslcrl|sslpassword|ssl=/i,
+    );
+    expect(config.connectionString).toContain('keepalives=1');
+    expect(config.ssl).toEqual({ rejectUnauthorized: true });
+  });
+});
+
+describe('fail-closed TLS enforcement', () => {
+  it.each([
+    'sslmode=disable',
+    'sslmode=prefer',
+    'sslmode=no-verify',
+    'uselibpqcompat=true&sslmode=require',
+    'sslrootcert=/etc/ssl/ca.pem',
+  ])('makes no connection attempt for ?%s', async (directive) => {
+    let clientBuilt = false;
+    const reader = createPgDatabaseReader(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?${directive}`,
+      {
+        clientFactory: () => {
+          clientBuilt = true;
+          return {
+            connect: async () => undefined,
+            query: async () => ({ rows: [] }),
+            end: async () => undefined,
+          };
+        },
+      },
+    );
+
+    const result = await reader.inspectIdentity();
+
+    expect(clientBuilt).toBe(false);
+    expect(result.state).toBe('unavailable');
+    expect(result.reason).toBe('insecure_tls_configuration');
+  });
+
+  it('refuses insecure TLS without producing an observed identity', async () => {
+    const reader = createPgDatabaseReader(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=disable`,
+      {
+        clientFactory: () => ({
+          connect: async () => undefined,
+          query: async () => ({ rows: [] }),
+          end: async () => undefined,
+        }),
+      },
+    );
+
+    const result = await reader.inspectIdentity();
+
+    // The endpoint-derived ref is reported as connection-target evidence only.
+    expect(result.observedProjectRef).toBeUndefined();
+    expect(result.targetProjectRef).toBe(REF);
+    expect(result.identitySource).toBe('direct_host');
+  });
+
+  it('never opens a session for migration history when the TLS configuration is insecure', async () => {
+    let clientBuilt = false;
+    const reader = createPgDatabaseReader(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres?sslmode=disable`,
+      {
+        clientFactory: () => {
+          clientBuilt = true;
+          return {
+            connect: async () => undefined,
+            query: async () => ({ rows: [] }),
+            end: async () => undefined,
+          };
+        },
+      },
+    );
+
+    const result = await reader.readMigrationHistory();
+
+    expect(clientBuilt).toBe(false);
+    expect(result.state).toBe('unavailable');
+    expect(result.reason).toBe('connection_unavailable');
+  });
+
+  it.each([
+    'CERT_HAS_EXPIRED',
+    'CERT_NOT_YET_VALID',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+  ])('normalizes certificate verification failure %s to tls_error', async (code) => {
+    const reader = createPgDatabaseReader(
+      `postgresql://postgres:pw@db.${REF}.supabase.co:5432/postgres`,
+      {
+        clientFactory: () => ({
+          connect: async () => {
+            throw Object.assign(new Error('certificate has expired for db host'), { code });
+          },
+          query: async () => ({ rows: [] }),
+          end: async () => undefined,
+        }),
+      },
+    );
+
+    const result = await reader.inspectIdentity();
+
+    expect(result.state).toBe('unavailable');
+    expect(result.reason).toBe('tls_error');
+    expect(JSON.stringify(result)).not.toContain('certificate has expired for db host');
+  });
+
+  it('cannot leak the connection URL, password, or raw TLS driver error text', async () => {
+    const secret = 's3cret-database-password';
+    const databaseUrl = `postgresql://postgres:${secret}@db.${REF}.supabase.co:5432/postgres`;
+    const reader = createPgDatabaseReader(databaseUrl, {
+      clientFactory: () => ({
+        connect: async () => {
+          throw new Error(
+            `tls handshake failed for ${databaseUrl}: self-signed cert blob -----BEGIN CERTIFICATE-----`,
+          );
+        },
+        query: async () => ({ rows: [] }),
+        end: async () => undefined,
+      }),
+    });
+
+    const result = await reader.inspectIdentity();
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(databaseUrl);
+    expect(serialized).not.toContain('tls handshake failed for');
+    expect(serialized).not.toContain('CERTIFICATE');
   });
 });
 

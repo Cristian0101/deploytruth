@@ -214,6 +214,78 @@ describe('database identity', () => {
     expect(report.verdict).toBe('WARN');
   });
 
+  it('reports the endpoint-derived target on a failed connection without claiming observed identity', () => {
+    const report = evaluateTruth(
+      healthy({
+        database: supabase({
+          connection: {
+            state: 'unavailable',
+            reason: 'connection_failed',
+            detail: 'unreachable',
+            targetProjectRef: OTHER_REF,
+            identitySource: 'direct_host',
+          },
+          identity: undefined,
+          observedProjectRef: undefined,
+          migrationHistory: { state: 'unavailable', reason: 'connection_unavailable' },
+        }),
+      }),
+    );
+    const finding = report.findings.find(
+      (entry) => entry.code === 'DATABASE_CONNECTION_UNAVAILABLE',
+    );
+
+    expect(finding?.status).toBe('WARN');
+    expect(finding?.evidence['connectionTargetRef']).toBe(OTHER_REF);
+    // A failed connection never produced an observation, so the mistargeted URL must not
+    // masquerade as an observed project mismatch.
+    expect(codes(report)).not.toContain('WRONG_DATABASE_PROJECT');
+    expect(report.verdict).toBe('WARN');
+  });
+
+  it.each(['insecure_tls_configuration', 'tls_error'] as const)(
+    'a refused or failed TLS session can never certify migration history (%s)',
+    (reason) => {
+      const report = evaluateTruth(
+        healthy({
+          database: supabase({
+            connection: { state: 'unavailable', reason, detail: 'normalized' },
+            identity: undefined,
+            observedProjectRef: undefined,
+            appliedMigrationIds: [],
+            migrationHistory: { state: 'unavailable', reason: 'connection_unavailable' },
+          }),
+        }),
+      );
+
+      expect(codes(report)).toContain('DATABASE_CONNECTION_UNAVAILABLE');
+      expect(codes(report)).toContain('REQUIRED_OBSERVATION_UNAVAILABLE');
+      expect(codes(report)).not.toContain('DATABASE_MIGRATIONS_BEHIND');
+      expect(report.verdict).not.toBe('PASS');
+    },
+  );
+
+  it('a failed connection cannot back certification even when other fields claim success', () => {
+    // Inconsistent evidence: connection failed, yet identity/history claim success and the
+    // applied set matches the catalog. The failed connection dominates — no comparison.
+    const report = evaluateTruth(
+      healthy({
+        database: supabase({
+          connection: { state: 'unavailable', reason: 'connection_failed', detail: 'x' },
+          observedProjectRef: REF,
+          identity: 'verified',
+          appliedMigrationIds: ['20240101000000'],
+          migrationHistory: { state: 'available' },
+        }),
+      }),
+    );
+
+    expect(codes(report)).toContain('DATABASE_CONNECTION_UNAVAILABLE');
+    expect(codes(report)).not.toContain('DATABASE_MIGRATIONS_BEHIND');
+    expect(codes(report)).toContain('REQUIRED_OBSERVATION_UNAVAILABLE');
+    expect(report.verdict).not.toBe('PASS');
+  });
+
   it('WRONG_DATABASE_PROJECT fails when the observed connection is another project', () => {
     const report = evaluateTruth(
       healthy({

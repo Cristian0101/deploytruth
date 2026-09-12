@@ -33,12 +33,13 @@ export const createFixtureSupabaseProvider = (options: FixtureSupabaseOptions = 
     capabilities: ['database', 'migration-status'] as const,
     validateConfig: (value: unknown) => value as { projectRef: string },
     observationFor: ({ config }) => {
+      const observedProjectRef = options.observedProjectRef ?? config.projectRef;
       const connection = options.connection ?? {
         state: 'available' as const,
         identitySource: options.identitySource ?? ('direct_host' as const),
+        targetProjectRef: observedProjectRef,
       };
       const connectionAvailable = connection.state === 'available';
-      const observedProjectRef = options.observedProjectRef ?? config.projectRef;
       return databaseObservationSchema.parse({
         provider: 'supabase',
         projectRef: config.projectRef,
@@ -93,6 +94,7 @@ export const createFakeDatabaseReader = (options: {
   inspectIdentity: async () => ({
     state: 'available',
     observedProjectRef: 'prodabc123',
+    targetProjectRef: 'prodabc123',
     identitySource: 'direct_host',
     ...options.identity,
   }),

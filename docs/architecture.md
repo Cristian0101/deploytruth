@@ -55,6 +55,7 @@ The engine works with three models:
 | Stable domain verification     | `deployment.stableDomainVerified`              |
 | Supabase project observability | `database.controlPlane`                        |
 | Database connection state      | `database.connection`                          |
+| Connection target evidence     | `database.connection.targetProjectRef`         |
 | Observed database identity     | `database.observedProjectRef`, `.identity`     |
 | Applied migration versions     | `database.appliedMigrationIds`                 |
 | Migration-history readability  | `database.migrationHistory`                    |
