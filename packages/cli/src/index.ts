@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, writeFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 
@@ -35,14 +35,20 @@ import {
   type TruthProvider,
   type VercelDeploymentConfig,
 } from '@deploytruth/providers';
-import { serializeTruthReport, writeReportFile } from '@deploytruth/reporter';
+import {
+  parseTruthReport,
+  serializeTruthReport,
+  writeLocalReport,
+  writeReportFile,
+} from '@deploytruth/reporter';
 import { Command } from 'commander';
+import openBrowser from 'open';
 
 import { formatCheckReport, runEnvironmentCheck } from './check.js';
+import { startLocalReportServer } from './open.js';
 import { SAMPLE_MANIFEST } from './sample-manifest.js';
 
-const FOUNDATION_MESSAGE =
-  'This command is not implemented yet. `deploytruth check` currently evaluates local Git truth; deployment, database, and runtime providers land in later milestones.';
+const FOUNDATION_MESSAGE = 'This command arrives in a later milestone.';
 
 const safeErrorMessage = (error: unknown): string =>
   redactText(error instanceof Error ? error.message : 'Unknown error');
@@ -74,6 +80,23 @@ interface CheckCommandOptions {
   readonly json?: boolean;
   readonly output?: string;
 }
+
+interface OpenCommandOptions {
+  readonly config: string;
+  readonly environment?: string;
+  readonly report?: string;
+  readonly port?: string;
+  readonly open: boolean;
+}
+
+const parsePort = (value: string | undefined): number | undefined => {
+  if (value === undefined) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new ConfigError('--port must be an integer between 1 and 65535.', []);
+  }
+  return port;
+};
 
 export interface CliDependencies {
   /** Injectable providers for tests; production uses the real adapters. */
@@ -442,7 +465,105 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
       }
     });
 
-  for (const commandName of ['map', 'diff', 'open']) {
+  program
+    .command('open')
+    .description('Run a truth check and open its private local visual report')
+    .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
+    .option('-e, --environment <name>', 'declared environment')
+    .option(
+      '--report <path>',
+      'open an existing normalized TruthReport without rerunning providers',
+    )
+    .option('--port <number>', 'explicit loopback port')
+    .option('--no-open', 'print the URL without opening a browser')
+    .action(async (options: OpenCommandOptions) => {
+      let server: Awaited<ReturnType<typeof startLocalReportServer>> | undefined;
+      try {
+        if (options.report !== undefined && options.environment !== undefined) {
+          throw new ConfigError('--report cannot be combined with --environment.', []);
+        }
+
+        const port = parsePort(options.port);
+        const staticMode = options.report !== undefined;
+        const configPath = resolve(options.config);
+        const reportPath = options.report === undefined ? undefined : resolve(options.report);
+
+        const runCheck = async () =>
+          (
+            await runEnvironmentCheck({
+              configPath,
+              ...(options.environment !== undefined
+                ? { environmentName: options.environment }
+                : {}),
+              ...(dependencies.gitProvider !== undefined
+                ? { gitProvider: dependencies.gitProvider }
+                : {}),
+              ...(dependencies.githubProvider !== undefined
+                ? { githubProvider: dependencies.githubProvider }
+                : {}),
+              ...(dependencies.vercelProvider !== undefined
+                ? { vercelProvider: dependencies.vercelProvider }
+                : {}),
+              ...(dependencies.supabaseProvider !== undefined
+                ? { supabaseProvider: dependencies.supabaseProvider }
+                : {}),
+              ...(dependencies.migrationCatalogProvider !== undefined
+                ? { migrationCatalogProvider: dependencies.migrationCatalogProvider }
+                : {}),
+              ...(dependencies.runtimeProvider !== undefined
+                ? { runtimeProvider: dependencies.runtimeProvider }
+                : {}),
+              env,
+            })
+          ).report;
+
+        const report = reportPath
+          ? parseTruthReport(await readFile(reportPath, 'utf8'))
+          : await runCheck();
+
+        if (!staticMode) {
+          await writeLocalReport(dirname(configPath), report);
+        }
+
+        server = await startLocalReportServer({
+          report,
+          ...(port !== undefined ? { port } : {}),
+          staticMode,
+          ...(staticMode ? {} : { rerun: runCheck }),
+          ...(staticMode
+            ? {}
+            : {
+                onReport: async (nextReport) => {
+                  await writeLocalReport(dirname(configPath), nextReport);
+                },
+              }),
+        });
+
+        console.log('DeployTruth visual report');
+        console.log(server.url);
+        if (options.open) {
+          console.log('Opening browser...');
+          await openBrowser(server.url);
+        }
+
+        await new Promise<void>((resolveStop) => {
+          const stop = (): void => {
+            process.off('SIGINT', stop);
+            process.off('SIGTERM', stop);
+            resolveStop();
+          };
+          process.on('SIGINT', stop);
+          process.on('SIGTERM', stop);
+        });
+      } catch (error) {
+        printConfigError(error);
+        process.exitCode = 2;
+      } finally {
+        await server?.close();
+      }
+    });
+
+  for (const commandName of ['map', 'diff']) {
     program
       .command(commandName)
       .description(`${commandName} command shell; arrives in a later milestone`)
