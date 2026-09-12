@@ -65,6 +65,16 @@ const edge = (
   findings: findings.map((finding) => finding.code).sort(),
 });
 
+const runtimeAttestationVerified = (observation: EnvironmentObservation | undefined): boolean => {
+  const runtime = observation?.runtime;
+  if (runtime === undefined) {
+    return false;
+  }
+  return runtime.availability === undefined
+    ? runtime.reachable
+    : runtime.availability.state === 'available' && runtime.freshness?.state === 'verified';
+};
+
 export const buildEnvironmentTopology = (
   environment: DeclaredEnvironment,
   observation: EnvironmentObservation | undefined,
@@ -138,7 +148,24 @@ export const buildEnvironmentTopology = (
         environment.id,
         environment.runtime.url,
         findingsFor(findings, environment.id, 'runtime'),
-        { sha: observation?.runtime?.commitSha ?? 'unknown' },
+        {
+          availability: observation?.runtime?.availability?.state ?? 'unknown',
+          freshness: observation?.runtime?.freshness?.state ?? 'unknown',
+          sha: observation?.runtime?.commitSha ?? 'unknown',
+          environment: observation?.runtime?.environment ?? 'unknown',
+          requiredEnvironmentVariables: environment.requiredEnvironmentVariables.length,
+          presentEnvironmentVariables:
+            observation?.runtime?.environmentVariables?.filter((variable) => variable.present)
+              .length ?? 0,
+          ...(observation?.runtime?.databaseConnection !== undefined
+            ? {
+                databaseProvider: observation.runtime.databaseConnection.provider,
+                databaseTarget:
+                  observation.runtime.databaseConnection.targetProjectRef ?? 'unverified',
+                databaseConnection: observation.runtime.databaseConnection.status,
+              }
+            : {}),
+        },
       ),
     );
   }
@@ -152,7 +179,7 @@ export const buildEnvironmentTopology = (
     );
   }
 
-  if (environment.deployment && environment.database) {
+  if (environment.deployment && environment.database && !environment.runtime) {
     const connection = observation?.deployment?.connectedResources.find(
       (resource) => resource.type === 'database',
     );
@@ -165,11 +192,41 @@ export const buildEnvironmentTopology = (
   }
 
   if (environment.deployment && environment.runtime) {
+    const deploymentSha = observation?.deployment?.commitSha;
+    const runtimeSha = observation?.runtime?.commitSha;
     edges.push(
-      edge(deployment, runtime, true, Boolean(observation?.runtime?.reachable), [
-        ...findingsFor(findings, environment.id, 'deployment'),
-        ...findingsFor(findings, environment.id, 'runtime'),
-      ]),
+      edge(
+        deployment,
+        runtime,
+        true,
+        runtimeAttestationVerified(observation) &&
+          deploymentSha !== undefined &&
+          runtimeSha !== undefined &&
+          deploymentSha === runtimeSha,
+        [
+          ...findingsFor(findings, environment.id, 'deployment'),
+          ...findingsFor(findings, environment.id, 'runtime'),
+        ],
+      ),
+    );
+  }
+
+  if (environment.runtime && environment.database) {
+    const runtimeConnection = observation?.runtime?.databaseConnection;
+    edges.push(
+      edge(
+        runtime,
+        database,
+        true,
+        runtimeAttestationVerified(observation) &&
+          runtimeConnection?.identity === 'verified' &&
+          runtimeConnection.targetProjectRef === environment.database.projectRef &&
+          runtimeConnection.status === 'connected',
+        [
+          ...findingsFor(findings, environment.id, 'runtime'),
+          ...findingsFor(findings, environment.id, 'database'),
+        ],
+      ),
     );
   }
 

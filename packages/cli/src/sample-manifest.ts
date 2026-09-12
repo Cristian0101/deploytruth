@@ -17,7 +17,7 @@ environments:
       provider: supabase
       project_ref: replace-with-project-ref
     runtime:
-      url: https://example.com/api/version
+      url: https://example.com/api/deploytruth/runtime
       expected_environment: production
     checks:
       local_git: true

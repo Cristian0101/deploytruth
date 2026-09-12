@@ -50,6 +50,20 @@ describe('architectural boundaries', () => {
     expect(vercel).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
   });
 
+  it('keeps runtime attestation transport and probing GET-only with no environment dump', () => {
+    const provider = [
+      read('packages/providers/src/runtime/transport.ts'),
+      read('packages/providers/src/runtime/adapter.ts'),
+    ].join('\n');
+    const endpoint = read('examples/live-acceptance/api/deploytruth/runtime.js');
+
+    expect(provider).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
+    expect(endpoint).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
+    expect(endpoint).toContain("method: 'GET'");
+    expect(endpoint).not.toMatch(/Object\.entries\(process\.env\)|JSON\.stringify\(process\.env\)/);
+    expect(endpoint).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
+  });
+
   it('keeps raw Vercel API concerns out of core', () => {
     const source = [
       read('packages/core/src/domain.ts'),

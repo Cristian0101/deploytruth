@@ -22,11 +22,11 @@ environments:
       migrations:
         directory: examples/live-acceptance/supabase/migrations
     runtime:
-      url: https://deploytruth-live-acceptance.vercel.app/api/version
+      url: https://deploytruth-live-acceptance.vercel.app/api/deploytruth/runtime
       expected_environment: production
     required_environment_variables:
       - SUPABASE_URL
-      - SUPABASE_PROJECT_REF
+      - SUPABASE_PUBLISHABLE_KEY
     checks:
       local_git: true
       remote_source: true

@@ -46,7 +46,7 @@ const isCheckApplicable = (environment: DeclaredEnvironment, check: CheckName): 
     case 'runtime_identity':
       return Boolean(environment.deployment && environment.runtime);
     case 'environment_isolation':
-      return Boolean(environment.deployment && environment.database);
+      return Boolean(environment.deployment && (environment.runtime || environment.database));
     case 'environment_variables':
       return environment.requiredEnvironmentVariables.length > 0;
   }
@@ -86,7 +86,7 @@ const sourceSha = (observation?: EnvironmentObservation): string | undefined =>
     : (observation?.source?.remoteHeadSha ?? observation?.source?.headSha);
 
 const databaseConnection = (observation?: EnvironmentObservation) =>
-  observation?.deployment?.connectedResources.find((connection) => connection.type === 'database');
+  observation?.deployment?.connectedResources?.find((connection) => connection.type === 'database');
 
 export const dirtyWorktreeRule: TruthRule = {
   code: 'DIRTY_WORKTREE',
@@ -1425,7 +1425,7 @@ export const runtimeShaMismatchRule: TruthRule = {
   evaluate: ({ environment, observation }) => {
     const expected = observation?.deployment?.commitSha;
     const observed = observation?.runtime?.commitSha;
-    if (!expected || !observed || expected === observed) {
+    if (!runtimeAttestationUsable(observation) || !expected || !observed || expected === observed) {
       return [];
     }
 
@@ -1451,22 +1451,101 @@ export const runtimeShaMismatchRule: TruthRule = {
   },
 };
 
-export const environmentIdentityMismatchRule: TruthRule = {
-  code: 'ENVIRONMENT_IDENTITY_MISMATCH',
-  check: 'runtime_identity',
+const runtimeAttestationUsable = (observation?: EnvironmentObservation): boolean => {
+  const runtime = observation?.runtime;
+  if (runtime === undefined) {
+    return false;
+  }
+  // Pre-M5 fixtures had no availability/freshness fields. Preserve their deterministic
+  // semantics while requiring both fields for every M5 adapter observation.
+  if (runtime.availability === undefined) {
+    return runtime.reachable;
+  }
+  return runtime.availability.state === 'available' && runtime.freshness?.state === 'verified';
+};
+
+const expectedRuntimeEnvironment = (
+  environment: DeclaredEnvironment,
+  observation?: EnvironmentObservation,
+): string | undefined =>
+  observation?.deployment?.target ??
+  environment.deployment?.target ??
+  observation?.deployment?.environment;
+
+export const runtimeAttestationUnavailableRule: TruthRule = {
+  code: 'RUNTIME_ATTESTATION_UNAVAILABLE',
   evaluate: ({ environment, observation }) => {
-    const expected = environment.runtime?.expectedEnvironment ?? environment.id;
+    const runtime = observation?.runtime;
+    if (
+      runtime === undefined ||
+      (runtime.availability?.state !== 'unavailable' && runtime.reachable !== false)
+    ) {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_ATTESTATION_UNAVAILABLE',
+        title: 'Runtime attestation could not be observed',
+        description:
+          'The running application did not provide an authoritative runtime attestation. No control-plane fallback is used.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'available runtime attestation',
+        observed: runtime.availability?.reason ?? 'unavailable',
+        evidence: {
+          reason: runtime.availability?.reason ?? 'unavailable',
+          ...(runtime.statusCode !== undefined ? { statusCode: runtime.statusCode } : {}),
+        },
+        affectedComponents: [component('runtime', environment.id)],
+        remediation:
+          'Verify the declared runtime endpoint, HTTPS reachability, response size, and strict v1 response contract.',
+      }),
+    ];
+  },
+};
+
+export const runtimeAttestationFreshnessUnverifiedRule: TruthRule = {
+  code: 'RUNTIME_ATTESTATION_FRESHNESS_UNVERIFIED',
+  evaluate: ({ environment, observation }) => {
+    const runtime = observation?.runtime;
+    if (runtime?.availability?.state !== 'available' || runtime.freshness?.state === 'verified') {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_ATTESTATION_FRESHNESS_UNVERIFIED',
+        title: 'Runtime attestation freshness could not be verified',
+        description:
+          'The runtime did not echo the cryptographically random request nonce exactly, so the response may be stale or replayed.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'exact nonce echo',
+        observed: runtime.freshness?.reason ?? 'freshness evidence missing',
+        evidence: { reason: runtime.freshness?.reason ?? 'missing' },
+        affectedComponents: [component('runtime', environment.id)],
+        remediation:
+          'Return the exact request nonce from the runtime and keep the endpoint cache disabled.',
+      }),
+    ];
+  },
+};
+
+export const runtimeEnvironmentMismatchRule: TruthRule = {
+  code: 'RUNTIME_ENVIRONMENT_MISMATCH',
+  check: 'environment_isolation',
+  evaluate: ({ environment, observation }) => {
+    const expected = expectedRuntimeEnvironment(environment, observation);
     const observed = observation?.runtime?.environment;
-    if (!observed || expected === observed) {
+    if (!runtimeAttestationUsable(observation) || !expected || !observed || expected === observed) {
       return [];
     }
 
     return [
       finding({
-        code: 'ENVIRONMENT_IDENTITY_MISMATCH',
+        code: 'RUNTIME_ENVIRONMENT_MISMATCH',
         title: 'Runtime reports the wrong environment identity',
         description:
-          'The runtime identity endpoint does not identify itself as the declared environment.',
+          'The runtime environment differs from the declared or observed deployment target. The logical manifest environment id is not used for this comparison.',
         severity: 'HIGH',
         status: 'FAIL',
         expected,
@@ -1474,7 +1553,151 @@ export const environmentIdentityMismatchRule: TruthRule = {
         evidence: { runtimeUrl: environment.runtime?.url ?? 'not-declared' },
         affectedComponents: [component('runtime', environment.id)],
         remediation:
-          'Correct the build-time environment identity and verify the deployed runtime endpoint.',
+          'Inspect the deployed target and runtime-provided environment label, then deploy the build to the intended target.',
+      }),
+    ];
+  },
+};
+
+export const runtimeRequiredEnvironmentMissingRule: TruthRule = {
+  code: 'RUNTIME_REQUIRED_ENV_MISSING',
+  check: 'environment_variables',
+  evaluate: ({ environment, observation }) => {
+    if (!runtimeAttestationUsable(observation)) {
+      return [];
+    }
+    const evidence = new Map(
+      (observation?.runtime?.environmentVariables ?? []).map((variable) => [
+        variable.name,
+        variable.present,
+      ]),
+    );
+    const explicitlyMissing = environment.requiredEnvironmentVariables.filter(
+      (name) => evidence.get(name) === false,
+    );
+    if (explicitlyMissing.length === 0) {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_REQUIRED_ENV_MISSING',
+        title: 'Required runtime environment variable is missing',
+        description:
+          'The running application explicitly attested that a declared-required variable is absent. Only presence booleans were observed.',
+        severity: 'HIGH',
+        status: 'FAIL',
+        expected: environment.requiredEnvironmentVariables,
+        observed: [...evidence.entries()]
+          .filter(([, present]) => present)
+          .map(([name]) => name)
+          .sort(),
+        evidence: { missingVariableNames: explicitlyMissing.sort() },
+        affectedComponents: [component('runtime', environment.id)],
+        remediation:
+          'Configure the required variable in the intended deployment environment and create a new deployment.',
+      }),
+    ];
+  },
+};
+
+export const runtimeDatabaseProjectMismatchRule: TruthRule = {
+  code: 'RUNTIME_DATABASE_PROJECT_MISMATCH',
+  check: 'environment_isolation',
+  evaluate: ({ environment, observation }) => {
+    const expected = environment.database?.projectRef;
+    const observed = observation?.runtime?.databaseConnection?.targetProjectRef;
+    if (!runtimeAttestationUsable(observation) || !expected || !observed || expected === observed) {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_DATABASE_PROJECT_MISMATCH',
+        title: 'Runtime targets the wrong database project',
+        description:
+          'The running application derived a different project identity from its actual connection URL than the database declared for this environment.',
+        severity: 'HIGH',
+        status: 'FAIL',
+        expected,
+        observed,
+        evidence: { declaredProjectRef: expected, runtimeTargetProjectRef: observed },
+        affectedComponents: [
+          component('runtime', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Correct the runtime connection configuration for this deployment target and redeploy. Do not rely on a separate project-ref variable.',
+      }),
+    ];
+  },
+};
+
+export const runtimeDatabaseIdentityUnverifiedRule: TruthRule = {
+  code: 'RUNTIME_DATABASE_IDENTITY_UNVERIFIED',
+  check: 'environment_isolation',
+  evaluate: ({ environment, observation }) => {
+    if (!environment.database || !runtimeAttestationUsable(observation)) {
+      return [];
+    }
+    const connection = observation?.runtime?.databaseConnection;
+    if (connection?.identity === 'verified' && connection.targetProjectRef !== undefined) {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_DATABASE_IDENTITY_UNVERIFIED',
+        title: 'Runtime database target identity is unverified',
+        description:
+          'The runtime connection configuration could not be safely tied to a project ref. Connectivity alone does not establish identity.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: environment.database.projectRef,
+        observed: connection?.targetProjectRef ?? 'unverified',
+        evidence: { provider: connection?.provider ?? environment.database.provider },
+        affectedComponents: [
+          component('runtime', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Use a documented provider URL whose host deterministically encodes the project identity.',
+      }),
+    ];
+  },
+};
+
+export const runtimeDatabaseConnectionUnavailableRule: TruthRule = {
+  code: 'RUNTIME_DATABASE_CONNECTION_UNAVAILABLE',
+  check: 'environment_isolation',
+  evaluate: ({ environment, observation }) => {
+    const connection = observation?.runtime?.databaseConnection;
+    if (
+      !environment.database ||
+      !runtimeAttestationUsable(observation) ||
+      connection?.identity !== 'verified' ||
+      connection.targetProjectRef === undefined ||
+      connection.status !== 'unavailable'
+    ) {
+      return [];
+    }
+    return [
+      finding({
+        code: 'RUNTIME_DATABASE_CONNECTION_UNAVAILABLE',
+        title: 'Runtime database connection could not be verified',
+        description:
+          'The runtime target identity is established, but its harmless read-only connection probe did not succeed.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'connected',
+        observed: connection.reason ?? 'unavailable',
+        evidence: {
+          targetProjectRef: connection.targetProjectRef,
+          reason: connection.reason ?? 'unavailable',
+        },
+        affectedComponents: [
+          component('runtime', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Verify the runtime publishable credential, provider availability, TLS, and network reachability, then redeploy if configuration changed.',
       }),
     ];
   },
@@ -1486,6 +1709,7 @@ export const environmentVariableMissingRule: TruthRule = {
   evaluate: ({ environment, observation }) => {
     if (
       environment.requiredEnvironmentVariables.length === 0 ||
+      observation?.runtime?.environmentVariables !== undefined ||
       observation?.deployment?.environmentVariables === undefined
     ) {
       return [];
@@ -1566,13 +1790,47 @@ const checkCoverage = (
       return true;
     }
     case 'runtime_identity':
-      return Boolean(observation?.deployment?.commitSha && observation.runtime?.commitSha);
-    case 'environment_isolation':
-      return Boolean(environment.database?.projectRef && databaseConnection(observation));
+      return Boolean(
+        runtimeAttestationUsable(observation) &&
+        observation?.deployment?.commitSha &&
+        observation.runtime?.commitSha &&
+        observation.deployment.commitSha === observation.runtime.commitSha,
+      );
+    case 'environment_isolation': {
+      if (environment.runtime === undefined) {
+        return Boolean(environment.database?.projectRef && databaseConnection(observation));
+      }
+      if (!runtimeAttestationUsable(observation)) {
+        return false;
+      }
+      const expectedEnvironment = expectedRuntimeEnvironment(environment, observation);
+      if (
+        expectedEnvironment === undefined ||
+        observation?.runtime?.environment !== expectedEnvironment
+      ) {
+        return false;
+      }
+      if (environment.database === undefined) {
+        return true;
+      }
+      const connection = observation.runtime.databaseConnection;
+      return Boolean(
+        connection?.identity === 'verified' &&
+        connection.targetProjectRef === environment.database.projectRef &&
+        connection.status === 'connected',
+      );
+    }
     case 'environment_variables':
       return (
         environment.requiredEnvironmentVariables.length === 0 ||
-        Boolean(observation?.deployment?.environmentVariables)
+        (runtimeAttestationUsable(observation) &&
+          environment.requiredEnvironmentVariables.every((name) =>
+            observation?.runtime?.environmentVariables?.some(
+              (variable) => variable.name === name && variable.present,
+            ),
+          )) ||
+        (observation?.runtime?.environmentVariables === undefined &&
+          Boolean(observation?.deployment?.environmentVariables))
       );
   }
 };
@@ -1639,8 +1897,14 @@ export const defaultRules: readonly TruthRule[] = [
   databaseMigrationHistoryUnavailableRule,
   databaseMigrationsBehindRule,
   databaseMigrationDriftRule,
+  runtimeAttestationUnavailableRule,
+  runtimeAttestationFreshnessUnverifiedRule,
   runtimeShaMismatchRule,
-  environmentIdentityMismatchRule,
+  runtimeEnvironmentMismatchRule,
+  runtimeRequiredEnvironmentMissingRule,
+  runtimeDatabaseProjectMismatchRule,
+  runtimeDatabaseIdentityUnverifiedRule,
+  runtimeDatabaseConnectionUnavailableRule,
   environmentVariableMissingRule,
 ];
 

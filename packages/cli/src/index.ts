@@ -14,12 +14,14 @@ import {
   type DatabaseObservation,
   type DeploymentObservation,
   type MigrationCatalogObservation,
+  type RuntimeObservation,
   type SourceObservation,
 } from '@deploytruth/core';
 import {
   createGitHubProvider,
   createGitMigrationCatalogProvider,
   createSupabaseProvider,
+  createRuntimeProvider,
   createVercelProvider,
   localGitProvider,
   resolveGitHubCredential,
@@ -28,6 +30,7 @@ import {
   type GitMigrationCatalogConfig,
   type LocalGitConfig,
   type ProviderDiagnostic,
+  type RuntimeAttestationConfig,
   type SupabaseDatabaseConfig,
   type TruthProvider,
   type VercelDeploymentConfig,
@@ -82,6 +85,7 @@ export interface CliDependencies {
     GitMigrationCatalogConfig,
     MigrationCatalogObservation
   >;
+  readonly runtimeProvider?: TruthProvider<RuntimeAttestationConfig, RuntimeObservation>;
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -288,11 +292,45 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }),
         );
 
+        const runtimeDiagnostics = await Promise.all(
+          environmentIds
+            .filter((id) => manifest.environments[id]?.runtime !== undefined)
+            .map(async (id) => {
+              const declared = manifest.environments[id];
+              const diagnostics: ProviderDiagnostic[] = [];
+              if (declared?.runtime === undefined) {
+                return { environment: id, diagnostics };
+              }
+              const runtimeProvider = dependencies.runtimeProvider ?? createRuntimeProvider();
+              try {
+                const config = runtimeProvider.validateConfig({
+                  url: declared.runtime.url,
+                  requiredEnvironmentVariables: declared.requiredEnvironmentVariables,
+                });
+                const results = await runtimeProvider.diagnose?.({
+                  project: manifest.project,
+                  environment: id,
+                  config,
+                });
+                diagnostics.push(...(results ?? []));
+              } catch (error) {
+                diagnostics.push({
+                  code: 'RUNTIME_CONFIG',
+                  title: 'Runtime attestation',
+                  status: 'error',
+                  message: safeErrorMessage(error),
+                });
+              }
+              return { environment: id, diagnostics };
+            }),
+        );
+
         const hasError = [
           ...gitDiagnostics,
           ...githubDiagnostics,
           ...vercelDiagnostics,
           ...supabaseDiagnostics,
+          ...runtimeDiagnostics,
         ].some(({ diagnostics }) => diagnostics.some((entry) => entry.status === 'error'));
         const result = {
           status: hasError ? 'DEGRADED' : 'VALID',
@@ -312,7 +350,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             supabase: supabaseDiagnostics.flatMap(({ environment, diagnostics }) =>
               diagnostics.map((entry) => ({ environment, ...entry })),
             ),
-            runtime: 'NOT_IMPLEMENTED',
+            runtime: runtimeDiagnostics.flatMap(({ environment, diagnostics }) =>
+              diagnostics.map((entry) => ({ environment, ...entry })),
+            ),
           },
         };
 
@@ -329,6 +369,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             ...githubDiagnostics,
             ...vercelDiagnostics,
             ...supabaseDiagnostics,
+            ...runtimeDiagnostics,
           ]) {
             for (const entry of diagnostics) {
               const marker =
@@ -337,7 +378,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }
           }
           console.log(
-            'Local Git, GitHub source, Vercel deployment, and Supabase database observation are active. Runtime providers are not implemented yet.',
+            'Local Git, GitHub source, Vercel deployment, Supabase database, and runtime attestation observation are active.',
           );
         }
         if (hasError) {
@@ -379,6 +420,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             : {}),
           ...(dependencies.migrationCatalogProvider !== undefined
             ? { migrationCatalogProvider: dependencies.migrationCatalogProvider }
+            : {}),
+          ...(dependencies.runtimeProvider !== undefined
+            ? { runtimeProvider: dependencies.runtimeProvider }
             : {}),
           env,
         });

@@ -8,6 +8,7 @@ import {
   type EnvironmentTruth,
   type MigrationCatalogObservation,
   type ProjectDeclaration,
+  type RuntimeObservation,
   type SourceObservation,
   type TruthReport,
 } from '@deploytruth/core';
@@ -17,12 +18,14 @@ import {
   createGitHubProvider,
   createGitMigrationCatalogProvider,
   createSupabaseProvider,
+  createRuntimeProvider,
   createVercelProvider,
   localGitProvider,
   type GitHubSourceConfig,
   type GitMigrationCatalogConfig,
   type TruthProvider,
   type LocalGitConfig,
+  type RuntimeAttestationConfig,
   type SupabaseDatabaseConfig,
   type VercelDeploymentConfig,
 } from '@deploytruth/providers';
@@ -44,6 +47,8 @@ export interface CheckOptions {
     GitMigrationCatalogConfig,
     MigrationCatalogObservation
   >;
+  /** Injectable for tests; defaults to the strict GET-only runtime attestation adapter. */
+  readonly runtimeProvider?: TruthProvider<RuntimeAttestationConfig, RuntimeObservation>;
   /** Environment for credential resolution; defaults to process.env. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -258,6 +263,40 @@ const observeMigrationCatalog = async (
   }
 };
 
+const observeRuntime = async (
+  provider: TruthProvider<RuntimeAttestationConfig, RuntimeObservation>,
+  context: {
+    project: string;
+    environment: string;
+    runtimeUrl: string;
+    requiredEnvironmentVariables: readonly string[];
+    signal?: AbortSignal;
+  },
+): Promise<{ observation?: RuntimeObservation; diagnostic?: string }> => {
+  let config: RuntimeAttestationConfig;
+  try {
+    config = provider.validateConfig({
+      url: context.runtimeUrl,
+      requiredEnvironmentVariables: [...context.requiredEnvironmentVariables],
+    });
+  } catch {
+    return { diagnostic: 'Invalid runtime attestation URL or required-variable declaration.' };
+  }
+
+  try {
+    const observation = await provider.observe({
+      project: context.project,
+      environment: context.environment,
+      config,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return { observation };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown runtime observation failure';
+    return { diagnostic: redactText(message) };
+  }
+};
+
 /**
  * Loads the manifest, observes local Git truth, remote-authoritative source truth (GitHub when
  * declared), deployment truth (Vercel when declared), and database truth (Supabase when
@@ -275,9 +314,26 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
   let remoteSource: SourceObservation | undefined;
   let deployment: DeploymentObservation | undefined;
   let database: DatabaseObservation | undefined;
+  let runtime: RuntimeObservation | undefined;
   let repositoryMigrations: MigrationCatalogObservation | undefined;
 
   const pending: Promise<void>[] = [];
+
+  if (environment?.runtime !== undefined) {
+    pending.push(
+      observeRuntime(options.runtimeProvider ?? createRuntimeProvider(), {
+        project: manifest.project,
+        environment: environmentId,
+        runtimeUrl: environment.runtime.url,
+        requiredEnvironmentVariables: environment.requiredEnvironmentVariables,
+      }).then((result) => {
+        runtime = result.observation;
+        if (result.diagnostic !== undefined) {
+          diagnostics.push(`runtime: ${result.diagnostic}`);
+        }
+      }),
+    );
+  }
 
   if (environment?.database !== undefined && environment.database.provider === 'supabase') {
     const declared = environment.database;
@@ -406,6 +462,7 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
             ...(remoteSource !== undefined ? { remoteSource } : {}),
             ...(deployment !== undefined ? { deployment } : {}),
             ...(database !== undefined ? { database } : {}),
+            ...(runtime !== undefined ? { runtime } : {}),
             ...(repositoryMigrations !== undefined ? { repositoryMigrations } : {}),
           },
         },
@@ -797,6 +854,91 @@ const formatDatabaseTruthSummary = (truth: EnvironmentTruth): readonly string[] 
     : [];
 };
 
+const formatRuntimeSection = (
+  truth: EnvironmentTruth,
+  diagnostics: readonly string[],
+): readonly string[] => {
+  const runtime = truth.observation?.runtime;
+  const lines = ['RUNTIME'];
+  if (runtime === undefined) {
+    const reason =
+      diagnostics
+        .find((entry) => entry.startsWith('runtime:'))
+        ?.slice('runtime:'.length)
+        .trim() ?? 'no runtime attestation available';
+    lines.push(row('Endpoint', truth.declaration.runtime?.url ?? 'unknown'));
+    lines.push(row('Attestation', `NOT OBSERVED — ${reason}`));
+    return lines;
+  }
+
+  lines.push(row('Endpoint', runtime.url));
+  if (runtime.availability?.state === 'unavailable') {
+    lines.push(
+      row(
+        'Attestation',
+        `UNAVAILABLE — ${runtime.availability.detail ?? runtime.availability.reason ?? 'unknown'}`,
+      ),
+    );
+    return lines;
+  }
+
+  lines.push(row('Attestation', 'AVAILABLE'));
+  lines.push(row('Freshness', (runtime.freshness?.state ?? 'unknown').toUpperCase()));
+  lines.push(row('Runtime SHA', shortSha(runtime.commitSha)));
+  lines.push(row('Deployment SHA', shortSha(truth.observation?.deployment?.commitSha)));
+  lines.push(row('Environment', runtime.environment ?? 'unknown'));
+  const required = truth.declaration.requiredEnvironmentVariables;
+  const present = required.filter((name) =>
+    runtime.environmentVariables?.some((variable) => variable.name === name && variable.present),
+  ).length;
+  lines.push(row('Required env', `${present} / ${required.length} present`));
+
+  if (truth.declaration.database !== undefined) {
+    const connection = runtime.databaseConnection;
+    lines.push('', '  Database connection');
+    lines.push(subRow('Provider', connection?.provider ?? 'unknown'));
+    lines.push(subRow('Target project', connection?.targetProjectRef ?? 'unverified'));
+    lines.push(subRow('Declared project', truth.declaration.database.projectRef));
+    lines.push(subRow('Probe', (connection?.status ?? 'unavailable').toUpperCase()));
+  }
+
+  const deploymentSha = truth.observation?.deployment?.commitSha;
+  if (
+    runtime.freshness?.state === 'verified' &&
+    deploymentSha !== undefined &&
+    runtime.commitSha === deploymentSha
+  ) {
+    lines.push(row('Runtime identity', 'VERIFIED'));
+  }
+  if (
+    required.every((name) =>
+      runtime.environmentVariables?.some((variable) => variable.name === name && variable.present),
+    )
+  ) {
+    lines.push(row('Environment vars', 'VERIFIED'));
+  }
+  const deploymentTarget =
+    truth.observation?.deployment?.target ?? truth.declaration.deployment?.target;
+  const connection = runtime.databaseConnection;
+  const databaseSatisfied =
+    truth.declaration.database === undefined ||
+    (connection?.identity === 'verified' &&
+      connection.targetProjectRef === truth.declaration.database.projectRef &&
+      connection.status === 'connected');
+  if (
+    runtime.freshness?.state === 'verified' &&
+    deploymentTarget !== undefined &&
+    runtime.environment === deploymentTarget &&
+    databaseSatisfied
+  ) {
+    lines.push(row('Environment isolation', 'VERIFIED'));
+  }
+  if (truth.declaration.database !== undefined && databaseSatisfied) {
+    lines.push(row('Runtime DB connection', 'VERIFIED'));
+  }
+  return lines;
+};
+
 const notCheckedSection = (title: string, provider: string): readonly string[] => [
   title,
   row(provider, 'NOT CHECKED (adapter not implemented)'),
@@ -849,16 +991,7 @@ export const formatCheckReport = (execution: CheckExecution): string => {
     }
   }
   if (environment.runtime !== undefined) {
-    lines.push(...notCheckedSection('RUNTIME', 'runtime endpoint'), '');
-  }
-  if (environment.requiredEnvironmentVariables.length > 0) {
-    lines.push(
-      ...notCheckedSection(
-        'ENVIRONMENT VARIABLES',
-        `${environment.requiredEnvironmentVariables.length} required`,
-      ),
-      '',
-    );
+    lines.push(...formatRuntimeSection(truth, execution.diagnostics), '');
   }
 
   if (truth.findings.length > 0) {

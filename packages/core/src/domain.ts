@@ -516,9 +516,62 @@ export const runtimeObservationSchema = z
     url: z.string().url(),
     reachable: z.boolean(),
     statusCode: z.number().int().min(100).max(599).optional(),
+    availability: z
+      .object({
+        state: z.enum(['available', 'unavailable']),
+        reason: z
+          .enum([
+            'insecure_url',
+            'network_error',
+            'timeout',
+            'aborted',
+            'redirect_rejected',
+            'http_error',
+            'wrong_content_type',
+            'malformed_response',
+            'oversized_response',
+            'unsupported_version',
+          ])
+          .optional(),
+        /** Fixed sanitized detail only; raw bodies, headers, URLs, and fetch errors are forbidden. */
+        detail: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    attestationVersion: z.literal(1).optional(),
+    freshness: z
+      .object({
+        state: z.enum(['verified', 'unverified']),
+        reason: z.enum(['missing_nonce', 'nonce_mismatch']).optional(),
+      })
+      .strict()
+      .optional(),
+    cacheControlNoStore: z.boolean().optional(),
     commitSha: z.string().min(1).optional(),
     environment: z.string().min(1).optional(),
     buildTime: z.string().datetime({ offset: true }).optional(),
+    /** Public-safe presence evidence for an application-defined allowlist. Values never enter. */
+    environmentVariables: z.array(environmentVariableObservationSchema).optional(),
+    databaseConnection: z
+      .object({
+        provider: z.string().min(1),
+        targetProjectRef: z.string().min(1).optional(),
+        identity: z.enum(['verified', 'unverified']),
+        status: z.enum(['connected', 'unavailable']),
+        reason: z
+          .enum([
+            'missing_configuration',
+            'credentials_rejected',
+            'network_error',
+            'timeout',
+            'tls_error',
+            'unexpected_status',
+            'identity_unverified',
+          ])
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type RuntimeObservation = z.infer<typeof runtimeObservationSchema>;

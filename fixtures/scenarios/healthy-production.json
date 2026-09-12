@@ -23,7 +23,7 @@
           "migrationDirectory": "supabase/migrations"
         },
         "runtime": {
-          "url": "https://meridia.example.com/api/version",
+          "url": "https://meridia.example.com/api/deploytruth/runtime",
           "expectedEnvironment": "production"
         },
         "requiredEnvironmentVariables": ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"],
@@ -128,12 +128,26 @@
           }
         },
         "runtime": {
-          "url": "https://meridia.example.com/api/version",
+          "url": "https://meridia.example.com/api/deploytruth/runtime",
           "reachable": true,
           "statusCode": 200,
+          "availability": { "state": "available" },
+          "attestationVersion": 1,
+          "freshness": { "state": "verified" },
+          "cacheControlNoStore": true,
           "commitSha": "abc123",
           "environment": "production",
-          "buildTime": "2026-09-10T18:24:00Z"
+          "buildTime": "2026-09-10T18:24:00Z",
+          "environmentVariables": [
+            { "name": "SUPABASE_URL", "present": true },
+            { "name": "NEXT_PUBLIC_SUPABASE_URL", "present": true }
+          ],
+          "databaseConnection": {
+            "provider": "supabase",
+            "targetProjectRef": "proddbx",
+            "identity": "verified",
+            "status": "connected"
+          }
         },
         "repositoryMigrations": {
           "directory": "supabase/migrations",

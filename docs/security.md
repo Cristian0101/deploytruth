@@ -40,11 +40,20 @@ Redaction is a final safety net, not permission to collect secret values. Adapte
 place opaque token-like values in supposedly harmless fields. New adapter work needs negative
 tests for every token or payload shape it handles.
 
-## Runtime endpoint requirements
+## Runtime attestation boundary
 
-The optional version endpoint should return only commit, environment, and build time. It should use
-the application’s normal routing policy, avoid verbose errors, and never return configuration,
-connection strings, provider IDs, or user data.
+The public M5 endpoint accepts only GET and a bounded nonce. It returns a strict versioned object
+containing runtime-origin commit/environment, explicit allowlisted presence booleans, a project ref
+derived from the actual connection URL, and normalized connection status. It never returns the URL,
+key, password, token, certificate, raw provider response, raw fetch error, arbitrary environment
+state, or user data. `Object.entries(process.env)` and equivalent environment dumps are forbidden.
+
+The client generates 32 random bytes, requires exact nonce echo, and never weakens freshness on a
+retry. Runtime transport requires HTTPS outside localhost, refuses credential-bearing URLs and
+redirects, times out, accepts JSON only, and stops reading after 16 KiB. It retains only three safe
+headers and discards rejected bodies. The Supabase probe uses GET `/auth/v1/settings` with a
+publishable key and discards its body; service-role, secret, database, and Management credentials
+are never used. See `docs/runtime-truth.md` and ADR 007.
 
 ## Local Git execution
 
@@ -160,3 +169,4 @@ Telemetry is not implemented and must remain opt-in if it is ever proposed.
 - Are fixtures fabricated and sanitized?
 - Do tests exercise serialized output for secret leakage?
 - Does it avoid writes to provider state, local Git state, or data records?
+- Does a runtime adapter require nonce freshness, strict bounded parsing, and value-free presence?
