@@ -1,26 +1,26 @@
 # DeployTruth checks declared topology against observations. Never put token or secret values here.
 version: 1
-project: meridia
+project: example-app
 
 environments:
   production:
     kind: production
     source:
       provider: github
-      repository: acme/meridia
+      repository: example/example-app
       branch: main
     deployment:
       provider: vercel
-      project: meridia
+      project: example-app
       target: production
-      domain: meridia.example.com
+      domain: example-app.example.com
     database:
       provider: supabase
       project_ref: prodabc123
       migrations:
-        directory: supabase/migrations
+        directory: examples/live-acceptance/supabase/migrations
     runtime:
-      url: https://meridia.example.com/api/version
+      url: https://example-app.example.com/api/version
       expected_environment: production
     required_environment_variables:
       - SUPABASE_URL
@@ -38,11 +38,11 @@ environments:
     kind: preview
     source:
       provider: github
-      repository: acme/meridia
+      repository: example/example-app
       branch: main
     deployment:
       provider: vercel
-      project: meridia
+      project: example-app
     database:
       provider: supabase
       project_ref: previewabc123

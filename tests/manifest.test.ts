@@ -9,7 +9,7 @@ describe('deploytruth.yml schema', () => {
     const contents = readFileSync(resolve(process.cwd(), 'deploytruth.example.yml'), 'utf8');
     const manifest = parseDeployTruthManifest(contents);
 
-    expect(manifest.project).toBe('meridia');
+    expect(manifest.project).toBe('example-app');
     expect(manifest.environments.production?.database?.projectRef).toBe('prodabc123');
     expect(manifest.environments.preview?.kind).toBe('preview');
   });

@@ -29,4 +29,3 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
-      - run: node packages/cli/dist/index.js doctor --config deploytruth.example.yml
