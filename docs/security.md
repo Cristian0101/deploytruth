@@ -52,7 +52,9 @@ Local Git observation runs through `GitRunner`, which invokes the `git` executab
 with `shell: false` — arguments are arrays, never interpolated strings, and manifest data is never
 used to build command lines. An allowlist (`assertReadOnlyGitInvocation`) restricts invocations to
 `version`, `rev-parse`, `rev-list`, `status` (safe flags), bare `remote`, `config --get`, read-form
-`symbolic-ref`, and `worktree list`. Mutating subcommands (`fetch`, `push`, `reset`, `checkout`,
+`symbolic-ref`, `worktree list`, and `ls-tree <rev> <path>` (immutable tree reads for the
+migration catalog — revisions limited to `HEAD`/`@`/hex object ids, paths limited to safe
+repository-relative segments). Mutating subcommands (`fetch`, `push`, `reset`, `checkout`,
 `update-ref`, `config` writes, …) and git-level flags that redirect the repository (`-c`,
 `--git-dir`, `-C`, …) are rejected before spawn.
 
@@ -102,6 +104,27 @@ sentinel-shaped env material never survives). Error normalization mirrors the Gi
 `missing_credentials`, `deployment_unavailable`, and `ambiguous` — divergent production aliases
 are reported as normalized domain→deployment evidence, never resolved by guessing — and adds
 the `retryAfter` seconds hint.
+
+## Supabase API and database access
+
+The Supabase adapter reaches `api.supabase.com` through `createSupabaseTransport`, built on the
+same GET-only `createReadOnlyFetchTransport`. It issues exactly one Management API call —
+`GET /v1/projects/{ref}` — and picks `ref`, `name`, `region`, and `status` from the response;
+everything else is discarded inside the adapter.
+
+Management tokens resolve from `DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN` then `SUPABASE_ACCESS_TOKEN`,
+are held inside the transport closure, and become an `Authorization` header on the wire only.
+Project `anon`/`service_role` keys are data-plane credentials and are not accepted for the
+control plane.
+
+The PostgreSQL boundary is `SupabaseDatabaseReader` — two methods (`inspectIdentity`,
+`readMigrationHistory`), no general `query()` surface. The connection string resolves only from
+`DEPLOYTRUTH_SUPABASE_DATABASE_URL`; a generic `DATABASE_URL` is deliberately never a fallback
+because it could silently target an unrelated database. The reader issues hardcoded read-only
+statements inside `START TRANSACTION READ ONLY` … `ROLLBACK` blocks, additionally requests
+`default_transaction_read_only` at startup, and never queries application tables, writes, or
+repairs history. Driver and network errors normalize to fixed reasons; raw messages, the URL,
+and its credentials never appear in observations, diagnostics, findings, or reports.
 
 ## Local UI and storage
 

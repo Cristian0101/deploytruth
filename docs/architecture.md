@@ -37,25 +37,38 @@ The engine works with three models:
    evidence from adapters.
 3. `TruthReport`: versioned, safe-to-store environment truth, findings, and topology.
 
-| Provider concern              | Normalized field                               |
-| ----------------------------- | ---------------------------------------------- |
-| Local HEAD SHA                | `SourceObservation.headSha`                    |
-| Local branch / detached state | `SourceObservation.branch`, `.detachedHead`    |
-| Working tree state            | `SourceObservation.workingTree` + counts/lists |
-| Local tracking ref SHA        | `SourceObservation.upstream.sha` (local only)  |
-| Ahead/behind vs tracking ref  | `SourceObservation.aheadBy` / `.behindBy`      |
-| GitHub branch SHA             | `remoteSource.remoteHeadSha`                   |
-| GitHub default branch         | `remoteSource.defaultBranch`                   |
-| Remote observability          | `remoteSource.availability`                    |
-| Production deployment id/URL  | `deployment.deploymentId`, `.deploymentUrl`    |
-| Deployment state              | `deployment.state` (ready/building/queued/…)   |
-| Deployment source commit      | `deployment.commitSha`, `.sourceBranch`        |
-| Deployment observability      | `deployment.availability`                      |
-| Ambiguous routing evidence    | `deployment.productionAssignments`             |
-| Stable domain verification    | `deployment.stableDomainVerified`              |
+| Provider concern               | Normalized field                               |
+| ------------------------------ | ---------------------------------------------- |
+| Local HEAD SHA                 | `SourceObservation.headSha`                    |
+| Local branch / detached state  | `SourceObservation.branch`, `.detachedHead`    |
+| Working tree state             | `SourceObservation.workingTree` + counts/lists |
+| Local tracking ref SHA         | `SourceObservation.upstream.sha` (local only)  |
+| Ahead/behind vs tracking ref   | `SourceObservation.aheadBy` / `.behindBy`      |
+| GitHub branch SHA              | `remoteSource.remoteHeadSha`                   |
+| GitHub default branch          | `remoteSource.defaultBranch`                   |
+| Remote observability           | `remoteSource.availability`                    |
+| Production deployment id/URL   | `deployment.deploymentId`, `.deploymentUrl`    |
+| Deployment state               | `deployment.state` (ready/building/queued/…)   |
+| Deployment source commit       | `deployment.commitSha`, `.sourceBranch`        |
+| Deployment observability       | `deployment.availability`                      |
+| Ambiguous routing evidence     | `deployment.productionAssignments`             |
+| Stable domain verification     | `deployment.stableDomainVerified`              |
+| Supabase project observability | `database.controlPlane`                        |
+| Database connection state      | `database.connection`                          |
+| Observed database identity     | `database.observedProjectRef`, `.identity`     |
+| Applied migration versions     | `database.appliedMigrationIds`                 |
+| Migration-history readability  | `database.migrationHistory`                    |
+| Expected migration source      | `repositoryMigrations` (`sourceSha`, `origin`) |
 
 Only normalized observations may reach `core`. Raw responses stay inside an adapter function and
 are discarded after translation.
+
+Database truth follows the same separation discipline (ADR 006): `database.controlPlane` is
+Management-API evidence, `database.connection`/`identity` is PostgreSQL evidence, and
+`repositoryMigrations` is immutable Git-tree evidence. A reachable database never implies the
+declared project; a healthy control plane never implies a reachable database; and an expected
+catalog is authoritative only when its `sourceSha` equals the remote-authoritative head (when a
+remote source is declared) — or the committed local HEAD otherwise.
 
 An environment's source evidence is a **pair**: `source` is the local observation (`git`
 adapter), `remoteSource` is the remote-authoritative observation (`github` adapter). They are
@@ -79,7 +92,12 @@ environments:
     kind: production
     source: { provider: github, repository: owner/my-app, branch: main }
     deployment: { provider: vercel, project: my-app, target: production, domain: app.example.com }
-    database: { provider: supabase, project_ref: prod-ref }
+    database:
+      {
+        provider: supabase,
+        project_ref: prodabc123,
+        migrations: { directory: supabase/migrations },
+      }
     runtime: { url: https://example.com/api/version, expected_environment: production }
     required_environment_variables: [SUPABASE_URL]
     checks: { deployment_sha: true, runtime_identity: true }
@@ -125,7 +143,14 @@ The foundation includes:
 - `STABLE_DOMAIN_STALE` -> fail when positively stale, warning when inconclusive
 - `WRONG_DATABASE_PROJECT` -> fail
 - `PREVIEW_USES_PRODUCTION_DATABASE` -> critical fail
+- `SUPABASE_PROJECT_UNAVAILABLE` -> warning
+- `DATABASE_CONNECTION_UNAVAILABLE` -> warning
+- `DATABASE_IDENTITY_UNVERIFIED` -> warning
+- `MIGRATION_SOURCE_UNAVAILABLE` -> warning
+- `MIGRATION_SOURCE_INVALID` -> warning
+- `DATABASE_MIGRATION_HISTORY_UNAVAILABLE` -> warning
 - `DATABASE_MIGRATIONS_BEHIND` -> fail
+- `DATABASE_MIGRATION_DRIFT` -> warning
 - `RUNTIME_SHA_MISMATCH` -> fail
 - `ENVIRONMENT_IDENTITY_MISMATCH` -> fail
 - `ENVIRONMENT_VARIABLE_MISSING` -> fail
@@ -174,6 +199,9 @@ through `packages/providers/src/github/` — a GET-only REST transport plus a `g
 producing the `remoteSource` observation (`docs/github-truth.md`, ADR 004). M3 (current) adds
 Vercel production deployment truth through `packages/providers/src/vercel/` — a GET-only REST
 transport plus a `vercel` adapter producing the `deployment` observation (`docs/vercel-truth.md`,
-ADR 005). M4 Supabase, M5 wires production rule selection, M6 makes `check` live, M7 runtime
-identity, M8 the local topology UI, and M9 the action. Every adapter milestone starts with
-fixtures.
+ADR 005). M4 (current) adds Supabase database and migration truth through
+`packages/providers/src/supabase/` plus the `git ls-tree` migration catalog in
+`packages/providers/src/git/migrations.ts` — a GET-only Management API adapter, a two-method
+read-only PostgreSQL reader, and identity-gated comparison (`docs/supabase-truth.md`, ADR 006).
+M5 wires production rule selection, M6 makes `check` live, M7 runtime identity, M8 the local
+topology UI, and M9 the action. Every adapter milestone starts with fixtures.

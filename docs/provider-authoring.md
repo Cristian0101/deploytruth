@@ -93,6 +93,26 @@ The same honesty rules apply, with two additions:
   or timestamps. If the provider cannot prove it, leave `commitSha` unset so the report shows
   `DEPLOYMENT_SOURCE_UNVERIFIED` instead of a fabricated match.
 
+## Database adapters
+
+Database adapters (the `supabase` adapter is the model) produce the `database` observation and
+combine two evidence sources that must stay separate:
+
+- a **control-plane** read through the GET-only transport (does the declared project exist), and
+- a **connection** read through a narrow protocol boundary (is a database reachable, and can its
+  endpoint be attributed to the declared project).
+
+The protocol boundary is an explicit interface — `SupabaseDatabaseReader` exposes
+`inspectIdentity()` and `readMigrationHistory()`, never a general `query()`. Implement it with
+hardcoded read-only statements inside explicit read-only transactions, inject a fake in tests,
+and never place connection strings, driver errors, or SQL text on the observation. Identity must
+come from deterministic evidence the endpoint itself supplies; connectivity alone is
+`unverified`, never `verified`.
+
+The expected-migration catalog is a separate provider (`git-migrations`) that reads the immutable
+Git object tree via `git ls-tree`, not the working-tree filesystem. Adapters report which commit
+the catalog came from (`sourceSha`); whether that commit is authoritative is a rule decision.
+
 ## What not to do
 
 - Do not export SDK response types.

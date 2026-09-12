@@ -42,7 +42,9 @@ tracking refs as local (e.g. `local ref; remote unverified`).
 - Commands execute via `execFile` with `shell: false`; arguments are an array, never a string.
 - A fixed allowlist (`assertReadOnlyGitInvocation`) permits only `version`, `rev-parse`,
   `rev-list`, `status` (safe flags only), bare `remote`, `config --get`, read-form `symbolic-ref`,
-  and `worktree list`. Mutating subcommands, git-level flags (`-c`, `--git-dir`, `-C`), and
+  `worktree list`, and `ls-tree <rev> <path>` (added in M4 for the immutable migration catalog;
+  revisions limited to `HEAD`/`@`/hex object ids, paths to safe repository-relative segments).
+  Mutating subcommands, git-level flags (`-c`, `--git-dir`, `-C`), and
   config writes are rejected before any process spawns.
 - `GIT_OPTIONAL_LOCKS=0` prevents `status` from refreshing the index on disk.
 - `GIT_DIR`-style environment overrides are stripped so observation always targets the requested

@@ -7,9 +7,10 @@ produces deterministic PASS, WARN, or FAIL reports. It is local-first, read-only
 send telemetry by default.
 
 This repository currently contains the v0.1 foundation, M1 local Git truth, M2 GitHub
-authoritative source truth, and M3 Vercel production deployment truth: contracts, fixtures,
-deterministic rules, safe reports, a working `check`/`doctor` CLI, a report-viewer boundary, and
-CI. Supabase and runtime adapters begin in later milestones.
+authoritative source truth, M3 Vercel production deployment truth, and M4 Supabase database and
+migration truth: contracts, fixtures, deterministic rules, safe reports, a working
+`check`/`doctor` CLI, a report-viewer boundary, and CI. Runtime adapters begin in later
+milestones.
 
 ## Quick start
 
@@ -26,12 +27,15 @@ node packages/cli/dist/index.js check --config deploytruth.yml --environment pro
 
 `check` evaluates real local Git truth (branch, HEAD, working tree, tracking ref, ahead/behind,
 worktrees, in-progress operations), remote-authoritative GitHub truth (repository metadata and
-the branch's live head SHA), and Vercel production deployment truth (the deployment currently
-serving production and the source commit it was built from) against the declared environment.
-Database and runtime providers are not implemented yet, so their evidence is reported as
-unverified and the verdict stays `WARN` — never a false `PASS`. See [docs/git-truth.md](docs/git-truth.md),
-[docs/github-truth.md](docs/github-truth.md), and [docs/vercel-truth.md](docs/vercel-truth.md)
-for what each truth does and does not prove.
+the branch's live head SHA), Vercel production deployment truth (the deployment currently
+serving production and the source commit it was built from), and Supabase database truth (the
+declared project's control-plane record, the observed database's identity, and whether its
+applied migration history matches the authoritative source tree) against the declared
+environment. Runtime providers are not implemented yet, so their evidence is reported as
+unverified and the verdict stays `WARN` — never a false `PASS`. See
+[docs/git-truth.md](docs/git-truth.md), [docs/github-truth.md](docs/github-truth.md),
+[docs/vercel-truth.md](docs/vercel-truth.md), and
+[docs/supabase-truth.md](docs/supabase-truth.md) for what each truth does and does not prove.
 
 The E2E seam is available as `pnpm test:e2e`; install Playwright Chromium first when running it on
 a new machine: `pnpm exec playwright install chromium`.
@@ -52,4 +56,5 @@ values. See [architecture](docs/architecture.md), [security](docs/security.md), 
 
 ## Status
 
-Foundation only. DeployTruth does **not** yet contact live providers or mutate any infrastructure.
+Live Git, GitHub, Vercel, and Supabase observation paths are implemented. DeployTruth only ever
+issues read-only provider calls and read-only SQL; it never mutates any infrastructure.
