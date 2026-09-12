@@ -1,6 +1,7 @@
 import type { EnvironmentTruth, TruthContext, TruthFinding, TruthReport } from './domain.js';
 import { REPORT_SCHEMA_VERSION, truthReportSchema } from './domain.js';
 import { evaluateRules, type TruthRule } from './rules.js';
+import { createRunId, isRunId } from './run-id.js';
 import { buildEnvironmentTopology, mergeTopologies } from './topology.js';
 import { aggregateVerdict } from './verdict.js';
 
@@ -54,6 +55,7 @@ export const evaluateTruth = (
 
   const report: TruthReport = {
     schemaVersion: REPORT_SCHEMA_VERSION,
+    runId: context.runId !== undefined && isRunId(context.runId) ? context.runId : createRunId(),
     generatedAt: context.generatedAt,
     project: context.declaration.project,
     strict: context.strict ?? false,

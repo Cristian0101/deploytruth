@@ -73,6 +73,9 @@ const activeChecks = (environment: DeclaredEnvironment): readonly CheckName[] =>
 const checkEnabled = (environment: DeclaredEnvironment, check?: CheckName): boolean =>
   !check || activeChecks(environment).includes(check);
 
+export const activeChecksFor = (environment: DeclaredEnvironment): readonly CheckName[] =>
+  activeChecks(environment);
+
 /**
  * The best available source SHA. When a remote-authoritative observation exists (ADR 004), only
  * its `remoteHeadSha` counts — an `unavailable` remoteSource must not silently fall back to local
@@ -1907,6 +1910,9 @@ export const defaultRules: readonly TruthRule[] = [
   runtimeDatabaseConnectionUnavailableRule,
   environmentVariableMissingRule,
 ];
+
+export const checkNameForFindingCode = (code: string): CheckName | undefined =>
+  defaultRules.find((rule) => rule.code === code)?.check;
 
 export const evaluateRules = (
   context: EnvironmentRuleContext,
