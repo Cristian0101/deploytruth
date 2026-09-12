@@ -10,6 +10,7 @@ import {
   supportedManifestProviders,
 } from '@deploytruth/config';
 import {
+  compareTruthReports,
   redactText,
   type DatabaseObservation,
   type DeploymentObservation,
@@ -17,6 +18,15 @@ import {
   type RuntimeObservation,
   type SourceObservation,
 } from '@deploytruth/core';
+import {
+  createReportHistoryStore,
+  HistoryError,
+  parseStoredReport,
+  reportMatchesNamespace,
+  serializeTruthReport,
+  writeLocalReport,
+  writeReportFile,
+} from '@deploytruth/reporter';
 import {
   createGitHubProvider,
   createGitMigrationCatalogProvider,
@@ -35,16 +45,12 @@ import {
   type TruthProvider,
   type VercelDeploymentConfig,
 } from '@deploytruth/providers';
-import {
-  parseTruthReport,
-  serializeTruthReport,
-  writeLocalReport,
-  writeReportFile,
-} from '@deploytruth/reporter';
 import { Command } from 'commander';
 import openBrowser from 'open';
 
-import { formatCheckReport, runEnvironmentCheck } from './check.js';
+import { formatCheckReport, runEnvironmentCheck, selectEnvironment } from './check.js';
+import { formatRunComparison } from './diff.js';
+import { formatHistoryList } from './history.js';
 import { startLocalReportServer } from './open.js';
 import { SAMPLE_MANIFEST } from './sample-manifest.js';
 
@@ -59,6 +65,10 @@ const printConfigError = (error: unknown): void => {
     for (const detail of error.details) {
       console.error(`  - ${redactText(detail)}`);
     }
+    return;
+  }
+  if (error instanceof HistoryError) {
+    console.error(redactText(error.message));
     return;
   }
   console.error(safeErrorMessage(error));
@@ -87,6 +97,19 @@ interface OpenCommandOptions {
   readonly report?: string;
   readonly port?: string;
   readonly open: boolean;
+}
+
+interface HistoryCommandOptions {
+  readonly config: string;
+  readonly environment?: string;
+  readonly limit?: string;
+}
+
+interface DiffCommandOptions {
+  readonly config: string;
+  readonly environment?: string;
+  readonly from?: string;
+  readonly to?: string;
 }
 
 const parsePort = (value: string | undefined): number | undefined => {
@@ -425,8 +448,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
     .option('--output <path>', 'write the serialized report to a file')
     .action(async (options: CheckCommandOptions) => {
       try {
+        const configPath = resolve(options.config);
         const execution = await runEnvironmentCheck({
-          configPath: resolve(options.config),
+          configPath,
           ...(options.environment !== undefined ? { environmentName: options.environment } : {}),
           ...(options.strict !== undefined ? { strict: options.strict } : {}),
           ...(dependencies.gitProvider !== undefined
@@ -453,6 +477,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
         if (options.output !== undefined) {
           await writeReportFile(resolve(options.output), execution.report);
         }
+        await writeLocalReport(dirname(configPath), execution.report);
         if (options.json) {
           console.log(serializeTruthReport(execution.report));
         } else {
@@ -518,13 +543,23 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
           ).report;
 
         const report = reportPath
-          ? parseTruthReport(await readFile(reportPath, 'utf8'))
+          ? await (async () => {
+              const parsed = parseStoredReport(await readFile(reportPath, 'utf8'));
+              if (parsed.status === 'unsupported') {
+                throw new ConfigError('UNSUPPORTED REPORT VERSION', []);
+              }
+              if (parsed.status !== 'ok') {
+                throw new ConfigError('The saved report is not valid JSON truth.', []);
+              }
+              return parsed.report;
+            })()
           : await runCheck();
 
         if (!staticMode) {
           await writeLocalReport(dirname(configPath), report);
         }
 
+        const historyEnvironment = report.environments[0]?.environment;
         server = await startLocalReportServer({
           report,
           ...(port !== undefined ? { port } : {}),
@@ -535,6 +570,15 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             : {
                 onReport: async (nextReport) => {
                   await writeLocalReport(dirname(configPath), nextReport);
+                },
+              }),
+          ...(staticMode || historyEnvironment === undefined
+            ? {}
+            : {
+                history: {
+                  store: createReportHistoryStore(dirname(configPath)),
+                  project: report.project,
+                  environment: historyEnvironment,
                 },
               }),
         });
@@ -563,17 +607,89 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
       }
     });
 
-  for (const commandName of ['map', 'diff']) {
-    program
-      .command(commandName)
-      .description(`${commandName} command shell; arrives in a later milestone`)
-      .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
-      .option('-e, --environment <name>', 'declared environment')
-      .action(() => {
-        console.error(FOUNDATION_MESSAGE);
+  program
+    .command('history')
+    .description('List stored local truth runs for one environment')
+    .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
+    .option('-e, --environment <name>', 'declared environment')
+    .option('--limit <count>', 'maximum runs to show', '20')
+    .action(async (options: HistoryCommandOptions) => {
+      try {
+        const configPath = resolve(options.config);
+        const manifest = await loadDeployTruthManifest(configPath);
+        const { id: environmentId } = selectEnvironment(manifest, options.environment);
+        const limit = Number(options.limit);
+        if (!Number.isInteger(limit) || limit < 1) {
+          throw new ConfigError('--limit must be a positive integer.', []);
+        }
+        const store = createReportHistoryStore(dirname(configPath));
+        const runs = (await store.list(manifest.project, environmentId)).slice(0, limit);
+        console.log(formatHistoryList(environmentId, runs));
+      } catch (error) {
+        printConfigError(error);
         process.exitCode = 2;
-      });
-  }
+      }
+    });
+
+  program
+    .command('diff')
+    .description('Compare two stored local truth runs')
+    .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
+    .option('-e, --environment <name>', 'declared environment')
+    .option('--from <runId>', 'older run ID')
+    .option('--to <runId>', 'newer run ID, or "latest"')
+    .action(async (options: DiffCommandOptions) => {
+      try {
+        const configPath = resolve(options.config);
+        const manifest = await loadDeployTruthManifest(configPath);
+        const { id: environmentId } = selectEnvironment(manifest, options.environment);
+        const store = createReportHistoryStore(dirname(configPath));
+        const usable = (await store.list(manifest.project, environmentId)).filter(
+          (entry) => entry.status === 'ok',
+        );
+        const toId =
+          options.to === undefined || options.to === 'latest' ? usable[0]?.runId : options.to;
+        if (toId === undefined) {
+          throw new ConfigError('Not enough stored runs to compare.', [
+            'Run deploytruth check at least twice for this environment.',
+          ]);
+        }
+        const toReport = await store.get(toId);
+        if (!reportMatchesNamespace(toReport, manifest.project, environmentId)) {
+          throw new HistoryError('not_found', 'Unknown run ID.');
+        }
+        const fromReport =
+          options.from !== undefined
+            ? await store.get(options.from)
+            : await store.previous(toReport.runId);
+        if (fromReport === undefined) {
+          throw new ConfigError('Not enough stored runs to compare.', [
+            'Run deploytruth check at least twice for this environment.',
+          ]);
+        }
+        if (!reportMatchesNamespace(fromReport, manifest.project, environmentId)) {
+          throw new HistoryError('not_found', 'Unknown run ID.');
+        }
+        if (fromReport.runId === toReport.runId) {
+          throw new ConfigError('Comparison requires two different run IDs.', []);
+        }
+        const comparison = compareTruthReports(fromReport, toReport);
+        console.log(formatRunComparison(comparison));
+      } catch (error) {
+        printConfigError(error);
+        process.exitCode = 2;
+      }
+    });
+
+  program
+    .command('map')
+    .description('map command shell; arrives in a later milestone')
+    .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
+    .option('-e, --environment <name>', 'declared environment')
+    .action(() => {
+      console.error(FOUNDATION_MESSAGE);
+      process.exitCode = 2;
+    });
 
   return program;
 };

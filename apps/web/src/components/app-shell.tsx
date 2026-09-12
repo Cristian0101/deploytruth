@@ -1,14 +1,22 @@
 import type { ReactNode } from 'react';
 import type { TruthReport } from '@deploytruth/core';
-import { FileText, GitBranch, Graph, Info, MapTrifold } from '@phosphor-icons/react';
+import {
+  ClockCounterClockwise,
+  FileText,
+  GitBranch,
+  Graph,
+  Info,
+  MapTrifold,
+} from '@phosphor-icons/react';
 
+import type { View } from '../lib/history-types.js';
 import { StatusBadge } from './status-badge.js';
 
 interface AppShellProps {
   readonly report: TruthReport;
   readonly environment: string;
-  readonly activeView: 'map' | 'report';
-  readonly onViewChange: (view: 'map' | 'report') => void;
+  readonly activeView: View;
+  readonly onViewChange: (view: View) => void;
   readonly children: ReactNode;
 }
 
@@ -45,6 +53,17 @@ export const AppShell = ({
         >
           <FileText weight="duotone" />
           Report
+        </button>
+        <button
+          type="button"
+          className={activeView === 'history' || activeView === 'comparison' ? 'is-active' : ''}
+          aria-current={
+            activeView === 'history' || activeView === 'comparison' ? 'page' : undefined
+          }
+          onClick={() => onViewChange('history')}
+        >
+          <ClockCounterClockwise weight="duotone" />
+          History
         </button>
       </nav>
       <div className="sidebar__principle">
