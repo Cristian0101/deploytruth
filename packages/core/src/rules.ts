@@ -887,33 +887,58 @@ export const stableDomainStaleRule: TruthRule = {
   },
 };
 
+/**
+ * Fires whenever any evidence source shows a definitive database-project mismatch: the
+ * deployment-reported connection (environment_isolation evidence) or the observed database
+ * connection identity itself (M4). It carries no check gate because it only produces a
+ * finding on positive mismatch evidence — coverage is owned by the migrations and
+ * environment_isolation checks.
+ */
 export const wrongDatabaseProjectRule: TruthRule = {
   code: 'WRONG_DATABASE_PROJECT',
-  check: 'environment_isolation',
   evaluate: ({ environment, observation }) => {
     const expected = environment.database?.projectRef;
-    const observed = databaseConnection(observation)?.identifier;
-    if (!expected || !observed || expected === observed) {
+    if (!expected) {
       return [];
     }
 
+    const viaDeployment = databaseConnection(observation)?.identifier;
+    const viaConnection = observation?.database?.observedProjectRef;
+    const mismatches = [
+      ...(viaConnection !== undefined && viaConnection !== expected
+        ? ['database-connection' as const]
+        : []),
+      ...(viaDeployment !== undefined && viaDeployment !== expected
+        ? ['deployment-connection' as const]
+        : []),
+    ];
+    if (mismatches.length === 0) {
+      return [];
+    }
+
+    const observed =
+      viaConnection !== undefined && viaConnection !== expected ? viaConnection : viaDeployment;
     return [
       finding({
         code: 'WRONG_DATABASE_PROJECT',
-        title: 'Deployment is connected to the wrong database project',
+        title: 'The observed database is not the declared project',
         description:
-          'The observed database connection does not match the database declared for this environment.',
+          'Observed database identity evidence does not match the database project declared for this environment.',
         severity: 'HIGH',
         status: 'FAIL',
         expected,
         observed,
-        evidence: { expectedProjectRef: expected, observedProjectRef: observed },
+        evidence: {
+          expectedProjectRef: expected,
+          observedProjectRef: observed ?? 'unknown',
+          evidenceSources: mismatches,
+        },
         affectedComponents: [
           component('deployment', environment.id),
           component('database', environment.id),
         ],
         remediation:
-          'Correct the deployment environment configuration and redeploy after verifying the intended project ref.',
+          'Correct the database connection and deployment environment configuration, then verify the intended project ref.',
       }),
     ];
   },
@@ -956,15 +981,368 @@ export const previewUsesProductionDatabaseRule: TruthRule = {
   },
 };
 
+const isSupabaseDatabase = (observation?: EnvironmentObservation): boolean =>
+  observation?.database?.provider === 'supabase';
+
+const supabaseUnavailableEvidence = (
+  availability:
+    | NonNullable<EnvironmentObservation['database']>['controlPlane']
+    | NonNullable<EnvironmentObservation['database']>['connection']
+    | NonNullable<EnvironmentObservation['database']>['migrationHistory'],
+): Record<string, SafeValue> => ({
+  reason: availability?.reason ?? 'unknown',
+  ...(availability !== undefined && 'detail' in availability && availability.detail !== undefined
+    ? { detail: availability.detail }
+    : {}),
+  ...(availability !== undefined &&
+  'rateLimit' in availability &&
+  availability.rateLimit?.resetAt !== undefined
+    ? { rateLimitResetAt: availability.rateLimit.resetAt }
+    : {}),
+});
+
+export const supabaseProjectUnavailableRule: TruthRule = {
+  code: 'SUPABASE_PROJECT_UNAVAILABLE',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const controlPlane = observation?.database?.controlPlane;
+    if (
+      environment.database?.provider !== 'supabase' ||
+      !isSupabaseDatabase(observation) ||
+      controlPlane?.state !== 'unavailable'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'SUPABASE_PROJECT_UNAVAILABLE',
+        title: 'Supabase project could not be authoritatively observed',
+        description:
+          'The Supabase Management API did not return control-plane metadata for the declared project; it may be absent, renamed, or not accessible to the configured credentials.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'project observable',
+        observed: controlPlane.reason ?? 'unavailable',
+        evidence: {
+          projectRef: observation?.database?.projectRef ?? environment.database.projectRef,
+          ...supabaseUnavailableEvidence(controlPlane),
+        },
+        affectedComponents: [component('database', environment.id)],
+        remediation:
+          'Verify the declared project_ref, configure DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN or SUPABASE_ACCESS_TOKEN, and retry after any rate-limit reset.',
+      }),
+    ];
+  },
+};
+
+export const databaseConnectionUnavailableRule: TruthRule = {
+  code: 'DATABASE_CONNECTION_UNAVAILABLE',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const connection = observation?.database?.connection;
+    if (!isSupabaseDatabase(observation) || connection?.state !== 'unavailable') {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DATABASE_CONNECTION_UNAVAILABLE',
+        title: 'Database connection could not be established',
+        description:
+          'DeployTruth could not open a read-only PostgreSQL session against the configured database endpoint, so database identity and migration history are unobserved.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'database connection observable',
+        observed: connection.reason ?? 'unavailable',
+        evidence: supabaseUnavailableEvidence(connection),
+        affectedComponents: [component('database', environment.id)],
+        remediation:
+          'Set DEPLOYTRUTH_SUPABASE_DATABASE_URL to a valid Supabase connection string and verify network/TLS access to the database endpoint.',
+      }),
+    ];
+  },
+};
+
+export const databaseIdentityUnverifiedRule: TruthRule = {
+  code: 'DATABASE_IDENTITY_UNVERIFIED',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const database = observation?.database;
+    if (
+      !isSupabaseDatabase(observation) ||
+      database?.connection?.state !== 'available' ||
+      database.identity !== 'unverified'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DATABASE_IDENTITY_UNVERIFIED',
+        title: 'Database identity cannot be tied to the declared project',
+        description:
+          'The PostgreSQL connection succeeded, but the connection endpoint does not expose a deterministic Supabase project ref. The reachable database may not be the declared project.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: `project ${environment.database?.projectRef ?? 'declared'}`,
+        observed: 'identity unverifiable from connection endpoint',
+        evidence: {
+          declaredProjectRef: environment.database?.projectRef ?? 'unknown',
+        },
+        affectedComponents: [component('database', environment.id)],
+        remediation:
+          'Use an official Supabase connection string (db.<ref>.supabase.co or a *.pooler.supabase.com pooler username) so the database can be attributed to a project.',
+      }),
+    ];
+  },
+};
+
+/**
+ * Catalog reasons that mean the source exists but cannot be interpreted as a valid Supabase
+ * migration set; every other unavailability degrades to MIGRATION_SOURCE_UNAVAILABLE.
+ */
+const INVALID_CATALOG_REASONS = new Set([
+  'directory_missing',
+  'not_a_directory',
+  'duplicate_versions',
+  'invalid_filenames',
+]);
+
+type MigrationSourceState =
+  | { readonly state: 'authoritative'; readonly sourceSha?: string }
+  | {
+      readonly state: 'invalid';
+      readonly catalog: NonNullable<EnvironmentObservation['repositoryMigrations']>;
+    }
+  | {
+      readonly state: 'unavailable';
+      readonly detail: string;
+      readonly evidence: Record<string, SafeValue>;
+    };
+
+/**
+ * Whether the observed migration catalog can stand in for the declared source. When a remote
+ * source is declared, the local Git tree is authoritative only while its commit equals the
+ * remote-authoritative head; an unobserved remote never falls back to local evidence
+ * (ADR 004). Without a remote source, the committed local tree is the source authority.
+ */
+const migrationSourceState = (
+  environment: DeclaredEnvironment,
+  observation?: EnvironmentObservation,
+): MigrationSourceState => {
+  const catalog = observation?.repositoryMigrations;
+  if (catalog === undefined) {
+    return {
+      state: 'unavailable',
+      detail: 'The expected migration catalog was not observed.',
+      evidence: {},
+    };
+  }
+
+  if (catalog.availability?.state === 'unavailable') {
+    if (INVALID_CATALOG_REASONS.has(catalog.availability.reason ?? '')) {
+      return { state: 'invalid', catalog };
+    }
+    return {
+      state: 'unavailable',
+      detail: catalog.availability.detail ?? 'The migration catalog could not be read.',
+      evidence: {
+        directory: catalog.directory,
+        reason: catalog.availability.reason ?? 'unknown',
+      },
+    };
+  }
+
+  // Pre-M4 catalog evidence carries no availability record; it is trusted as before.
+  if (environment.source === undefined) {
+    return {
+      state: 'authoritative',
+      ...(catalog.sourceSha !== undefined ? { sourceSha: catalog.sourceSha } : {}),
+    };
+  }
+
+  const remote = observation?.remoteSource;
+  if (remote === undefined) {
+    return {
+      state: 'unavailable',
+      detail:
+        'A remote source is declared but no remote-authoritative observation exists; the local migration tree cannot be certified.',
+      evidence: { repository: environment.source.repository ?? 'unknown' },
+    };
+  }
+  if (remote.availability?.state !== 'available' || remote.remoteHeadSha === undefined) {
+    return {
+      state: 'unavailable',
+      detail:
+        'The remote source authority could not be observed; the local migration tree cannot be certified as the declared source.',
+      evidence: {
+        repository: remote.repository ?? environment.source.repository ?? 'unknown',
+        reason: remote.availability?.reason ?? 'unknown',
+      },
+    };
+  }
+  if (catalog.sourceSha === undefined) {
+    return {
+      state: 'unavailable',
+      detail:
+        'The migration catalog does not record the commit it was read from, so it cannot be tied to the authoritative source.',
+      evidence: { remoteHeadSha: remote.remoteHeadSha },
+    };
+  }
+  if (catalog.sourceSha !== remote.remoteHeadSha) {
+    return {
+      state: 'unavailable',
+      detail:
+        'The local repository does not represent the authoritative source commit, so its migration tree cannot stand in for it.',
+      evidence: {
+        localHeadSha: catalog.sourceSha,
+        remoteHeadSha: remote.remoteHeadSha,
+        repository: remote.repository ?? environment.source.repository ?? 'unknown',
+      },
+    };
+  }
+  return { state: 'authoritative', sourceSha: catalog.sourceSha };
+};
+
+export const migrationSourceUnavailableRule: TruthRule = {
+  code: 'MIGRATION_SOURCE_UNAVAILABLE',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const source = migrationSourceState(environment, observation);
+    if (source.state !== 'unavailable') {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'MIGRATION_SOURCE_UNAVAILABLE',
+        title: 'Expected migration source is unavailable',
+        description:
+          'DeployTruth cannot establish which migrations the declared source expects, so applied database history cannot be certified.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'authoritative migration catalog',
+        observed: source.detail,
+        evidence: source.evidence,
+        affectedComponents: [
+          component('source', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Fetch the declared branch locally so HEAD matches the remote-authoritative SHA, or restore Git observation of the repository.',
+      }),
+    ];
+  },
+};
+
+export const migrationSourceInvalidRule: TruthRule = {
+  code: 'MIGRATION_SOURCE_INVALID',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const source = migrationSourceState(environment, observation);
+    if (source.state !== 'invalid') {
+      return [];
+    }
+
+    const availability = source.catalog.availability;
+    return [
+      finding({
+        code: 'MIGRATION_SOURCE_INVALID',
+        title: 'Expected migration source is invalid',
+        description:
+          'The declared migration directory exists in the source tree but cannot be interpreted as a valid Supabase migration set.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'valid migration catalog',
+        observed: availability?.reason ?? 'invalid',
+        evidence: {
+          directory: source.catalog.directory,
+          ...(availability?.invalidFilenames !== undefined
+            ? { invalidFilenames: [...availability.invalidFilenames].sort() }
+            : {}),
+          ...(availability?.duplicateVersions !== undefined
+            ? { duplicateVersions: [...availability.duplicateVersions].sort() }
+            : {}),
+        },
+        affectedComponents: [
+          component('source', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Fix the migration directory: every .sql file must match <version>_<name>.sql or r_<name>.sql, and versions must be unique.',
+      }),
+    ];
+  },
+};
+
+export const databaseMigrationHistoryUnavailableRule: TruthRule = {
+  code: 'DATABASE_MIGRATION_HISTORY_UNAVAILABLE',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    const database = observation?.database;
+    if (
+      !isSupabaseDatabase(observation) ||
+      database?.connection?.state !== 'available' ||
+      database?.migrationHistory?.state !== 'unavailable'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DATABASE_MIGRATION_HISTORY_UNAVAILABLE',
+        title: 'Applied migration history could not be read',
+        description:
+          'The database connection succeeded, but the Supabase migration history could not be observed; a missing history table is not the same as zero applied migrations.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'migration history readable',
+        observed: database.migrationHistory.reason ?? 'unavailable',
+        evidence: supabaseUnavailableEvidence(database.migrationHistory),
+        affectedComponents: [component('database', environment.id)],
+        remediation:
+          'Verify the configured credentials can read the provider’s migration history table, or apply the declared migrations so history exists.',
+      }),
+    ];
+  },
+};
+
+/**
+ * Expected-vs-applied comparison is certified only when every link holds: the catalog is
+ * authoritative for the declared source, the observed database is provably the declared
+ * project, and its migration history was actually read. Legacy observations without M4
+ * fields evaluate directly (pre-M4 fixture semantics).
+ */
+const migrationComparisonReady = (
+  environment: DeclaredEnvironment,
+  observation?: EnvironmentObservation,
+): boolean => {
+  if (migrationSourceState(environment, observation).state !== 'authoritative') {
+    return false;
+  }
+  const database = observation?.database;
+  if (database === undefined) {
+    return false;
+  }
+  if (database.identity !== undefined && database.identity !== 'verified') {
+    return false;
+  }
+  if (database.migrationHistory !== undefined && database.migrationHistory.state !== 'available') {
+    return false;
+  }
+  return true;
+};
+
 export const databaseMigrationsBehindRule: TruthRule = {
   code: 'DATABASE_MIGRATIONS_BEHIND',
   check: 'migrations',
   evaluate: ({ environment, observation }) => {
-    const expected = observation?.repositoryMigrations?.migrationIds;
-    const applied = new Set(observation?.database?.appliedMigrationIds ?? []);
-    if (!expected || !observation?.database) {
+    if (!migrationComparisonReady(environment, observation)) {
       return [];
     }
+    const expected = observation?.repositoryMigrations?.migrationIds ?? [];
+    const applied = new Set(observation?.database?.appliedMigrationIds ?? []);
 
     const missing = expected.filter((migrationId) => !applied.has(migrationId));
     if (missing.length === 0) {
@@ -981,13 +1359,50 @@ export const databaseMigrationsBehindRule: TruthRule = {
         status: 'FAIL',
         expected,
         observed: [...applied].sort(),
-        evidence: { missingMigrationIds: missing.sort() },
+        evidence: { missingMigrationIds: [...missing].sort() },
         affectedComponents: [
           component('source', environment.id),
           component('database', environment.id),
         ],
         remediation:
           'Review the missing migrations and apply them through the project’s approved migration workflow.',
+      }),
+    ];
+  },
+};
+
+export const databaseMigrationDriftRule: TruthRule = {
+  code: 'DATABASE_MIGRATION_DRIFT',
+  check: 'migrations',
+  evaluate: ({ environment, observation }) => {
+    if (!migrationComparisonReady(environment, observation)) {
+      return [];
+    }
+    const expected = new Set(observation?.repositoryMigrations?.migrationIds ?? []);
+    const applied = observation?.database?.appliedMigrationIds ?? [];
+
+    const extra = applied.filter((migrationId) => !expected.has(migrationId));
+    if (extra.length === 0) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DATABASE_MIGRATION_DRIFT',
+        title: 'Database reports migrations absent from the source',
+        description:
+          'The observed database records applied migration versions that the declared source does not contain. This can be legitimate (repair, squash, out-of-band history); it is not proof of schema corruption.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: [...expected].sort(),
+        observed: [...applied].sort(),
+        evidence: { extraMigrationIds: [...extra].sort() },
+        affectedComponents: [
+          component('source', environment.id),
+          component('database', environment.id),
+        ],
+        remediation:
+          'Confirm whether the extra applied versions are intentional history (repair/squash/out-of-band) and reconcile the declared source if needed.',
       }),
     ];
   },
@@ -1112,8 +1527,30 @@ const checkCoverage = (
       return observation?.remoteSource?.availability?.state === 'available';
     case 'deployment_sha':
       return Boolean(sourceSha(observation) && observation?.deployment?.commitSha);
-    case 'migrations':
-      return Boolean(observation?.repositoryMigrations && observation.database);
+    case 'migrations': {
+      const catalog = observation?.repositoryMigrations;
+      const database = observation?.database;
+      if (catalog === undefined || database === undefined) {
+        return false;
+      }
+      // Migration coverage requires the full evidence chain: an authoritative expected
+      // source, a connection provably tied to the declared project, and a readable
+      // migration history. Pre-M4 observations carry none of these fields and keep
+      // their original semantics.
+      if (migrationSourceState(environment, observation).state !== 'authoritative') {
+        return false;
+      }
+      if (database.identity !== undefined && database.identity !== 'verified') {
+        return false;
+      }
+      if (
+        database.migrationHistory !== undefined &&
+        database.migrationHistory.state !== 'available'
+      ) {
+        return false;
+      }
+      return true;
+    }
     case 'runtime_identity':
       return Boolean(observation?.deployment?.commitSha && observation.runtime?.commitSha);
     case 'environment_isolation':
@@ -1180,7 +1617,14 @@ export const defaultRules: readonly TruthRule[] = [
   stableDomainStaleRule,
   wrongDatabaseProjectRule,
   previewUsesProductionDatabaseRule,
+  supabaseProjectUnavailableRule,
+  databaseConnectionUnavailableRule,
+  databaseIdentityUnverifiedRule,
+  migrationSourceUnavailableRule,
+  migrationSourceInvalidRule,
+  databaseMigrationHistoryUnavailableRule,
   databaseMigrationsBehindRule,
+  databaseMigrationDriftRule,
   runtimeShaMismatchRule,
   environmentIdentityMismatchRule,
   environmentVariableMissingRule,

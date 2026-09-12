@@ -121,6 +121,10 @@ export const buildEnvironmentTopology = (
         environment.id,
         environment.database.projectRef,
         findingsFor(findings, environment.id, 'database'),
+        {
+          identity: observation?.database?.identity ?? 'unknown',
+          migrationHistory: observation?.database?.migrationHistory?.state ?? 'unknown',
+        },
       ),
     );
   }

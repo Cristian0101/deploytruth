@@ -375,11 +375,122 @@ export const deploymentObservationSchema = z
   .strict();
 export type DeploymentObservation = z.infer<typeof deploymentObservationSchema>;
 
+/**
+ * Reasons a database evidence source could not be observed. The first group covers the
+ * management/control-plane API; the second covers the PostgreSQL connection. All are fixed
+ * normalized strings — raw provider payloads and driver errors never reach the model.
+ */
+export const databaseUnavailableReasonSchema = z.enum([
+  'missing_credentials',
+  'unauthorized',
+  'forbidden',
+  'not_found_or_inaccessible',
+  'rate_limited',
+  'server_error',
+  'unexpected_status',
+  'malformed_response',
+  'network_error',
+  'timeout',
+  'aborted',
+  'invalid_url',
+  'authentication_failed',
+  'connection_failed',
+  'tls_error',
+  'database_unavailable',
+]);
+export type DatabaseUnavailableReason = z.infer<typeof databaseUnavailableReasonSchema>;
+
+/** Normalized control-plane project state (Supabase `status` mapped to this small set). */
+export const databaseProjectStateSchema = z.enum([
+  'healthy',
+  'degraded',
+  'transitioning',
+  'inactive',
+  'failed',
+  'removed',
+  'unknown',
+]);
+export type DatabaseProjectState = z.infer<typeof databaseProjectStateSchema>;
+
+/**
+ * Control-plane evidence: whether the declared project could be observed through the
+ * provider's management API. A successful lookup here never proves that a PostgreSQL
+ * connection targets the same project — the two evidence sources stay separate.
+ */
+export const databaseControlPlaneSchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    reason: databaseUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain credentials or raw payloads. */
+    detail: z.string().min(1).optional(),
+    rateLimit: remoteRateLimitSchema.optional(),
+    projectName: z.string().min(1).optional(),
+    region: z.string().min(1).optional(),
+    status: databaseProjectStateSchema.optional(),
+  })
+  .strict();
+export type DatabaseControlPlane = z.infer<typeof databaseControlPlaneSchema>;
+
+/**
+ * Database connection evidence: whether the configured PostgreSQL endpoint accepted a
+ * read-only session. `identitySource` records _how_ the observed project ref was derived
+ * from the connection endpoint — never the connection string itself.
+ */
+export const databaseConnectionStateSchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    reason: databaseUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain host credentials or driver errors. */
+    detail: z.string().min(1).optional(),
+    identitySource: z.enum(['direct_host', 'pooler_username']).optional(),
+  })
+  .strict();
+export type DatabaseConnectionState = z.infer<typeof databaseConnectionStateSchema>;
+
+/** Reasons applied migration history could not be read from the database. */
+export const migrationHistoryUnavailableReasonSchema = z.enum([
+  'connection_unavailable',
+  'history_table_missing',
+  'history_query_failed',
+  'malformed_rows',
+]);
+export type MigrationHistoryUnavailableReason = z.infer<
+  typeof migrationHistoryUnavailableReasonSchema
+>;
+
+export const databaseMigrationHistorySchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    reason: migrationHistoryUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain driver errors or SQL payloads. */
+    detail: z.string().min(1).optional(),
+  })
+  .strict();
+export type DatabaseMigrationHistory = z.infer<typeof databaseMigrationHistorySchema>;
+
+/**
+ * Database truth separates three evidence sources: the management control plane (does the
+ * declared project exist), the PostgreSQL connection (can we reach a database), and the
+ * identity claim tying them together (`observedProjectRef` derived deterministically from
+ * the connection endpoint, never asserted by connectivity alone).
+ */
 export const databaseObservationSchema = z
   .object({
     provider: z.string().min(1),
+    /** The declared project ref, echoed for correlation — never the observed identity. */
     projectRef: z.string().min(1).optional(),
+    controlPlane: databaseControlPlaneSchema.optional(),
+    connection: databaseConnectionStateSchema.optional(),
+    /** Project ref established by the connection endpoint itself, when determinable. */
+    observedProjectRef: z.string().min(1).optional(),
+    /**
+     * Whether the observed connection is provably the declared project. Set only when a
+     * connection was established; `unverified` means reachable-but-unattributable.
+     */
+    identity: z.enum(['verified', 'mismatch', 'unverified']).optional(),
+    /** Applied migration versions reported by the provider's migration history table. */
     appliedMigrationIds: z.array(z.string().min(1)).default([]),
+    migrationHistory: databaseMigrationHistorySchema.optional(),
   })
   .strict();
 export type DatabaseObservation = z.infer<typeof databaseObservationSchema>;
@@ -396,10 +507,47 @@ export const runtimeObservationSchema = z
   .strict();
 export type RuntimeObservation = z.infer<typeof runtimeObservationSchema>;
 
+/** Reasons the expected migration catalog could not be read from the source tree. */
+export const migrationCatalogUnavailableReasonSchema = z.enum([
+  'git_unavailable',
+  'not_a_repository',
+  'head_unavailable',
+  'directory_missing',
+  'not_a_directory',
+  'duplicate_versions',
+  'invalid_filenames',
+]);
+export type MigrationCatalogUnavailableReason = z.infer<
+  typeof migrationCatalogUnavailableReasonSchema
+>;
+
+export const migrationCatalogAvailabilitySchema = z
+  .object({
+    state: z.enum(['available', 'unavailable']),
+    reason: migrationCatalogUnavailableReasonSchema.optional(),
+    /** Sanitized human detail; must never contain raw Git stderr. */
+    detail: z.string().min(1).optional(),
+    /** `.sql` entries that cannot be interpreted under the provider's migration grammar. */
+    invalidFilenames: z.array(z.string().min(1)).optional(),
+    /** Migration versions claimed by more than one file. */
+    duplicateVersions: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+export type MigrationCatalogAvailability = z.infer<typeof migrationCatalogAvailabilitySchema>;
+
+/**
+ * The expected migration set. `origin: 'git-tree'` means the catalog was read from the
+ * committed object tree at `sourceSha` — never the mutable working-tree filesystem, so
+ * dirty or untracked files cannot contaminate expected truth.
+ */
 export const migrationCatalogObservationSchema = z
   .object({
     directory: z.string().min(1),
     migrationIds: z.array(z.string().min(1)),
+    /** The immutable commit SHA the catalog was read from. */
+    sourceSha: z.string().min(1).optional(),
+    origin: z.enum(['git-tree']).optional(),
+    availability: migrationCatalogAvailabilitySchema.optional(),
   })
   .strict();
 export type MigrationCatalogObservation = z.infer<typeof migrationCatalogObservationSchema>;
