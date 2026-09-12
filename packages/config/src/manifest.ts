@@ -35,6 +35,31 @@ export const VERCEL_SCOPE_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,127})$/;
 export const HOSTNAME_PATTERN =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/**
+ * A Supabase project ref. Hosted refs are 20 lowercase alphanumeric characters; the grammar
+ * stays permissive inside the safe identifier space rather than pinning a length Supabase
+ * does not publish as fixed.
+ */
+export const SUPABASE_PROJECT_REF_PATTERN = /^[a-z0-9]{6,64}$/;
+
+/** The conventional Supabase migration directory, applied when none is declared. */
+export const DEFAULT_MIGRATION_DIRECTORY = 'supabase/migrations';
+
+/**
+ * A repository-relative path: safe-character segments only — no absolute paths, no `..`
+ * traversal, no backslashes. Safe to hand to `git ls-tree` as a pathspec.
+ */
+export const REPOSITORY_RELATIVE_PATH_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9._-]+)*$/;
+
+const repositoryRelativePath = (message: string) =>
+  z
+    .string()
+    .regex(REPOSITORY_RELATIVE_PATH_PATTERN, message)
+    .refine((value) => !value.split('/').some((segment) => segment === '.' || segment === '..'), {
+      message: 'path must not contain . or .. segments',
+    });
+
 const sourceInputSchema = z
   .object({
     provider: z.literal('github'),
@@ -91,10 +116,17 @@ const deploymentInputSchema = z
 const databaseInputSchema = z
   .object({
     provider: z.literal('supabase'),
-    project_ref: z.string().min(1),
+    project_ref: z
+      .string()
+      .regex(
+        SUPABASE_PROJECT_REF_PATTERN,
+        'project_ref must be a Supabase project ref (lowercase letters and digits)',
+      ),
     migrations: z
       .object({
-        directory: z.string().min(1),
+        directory: repositoryRelativePath(
+          'migrations.directory must be a repository-relative path (for example supabase/migrations)',
+        ),
       })
       .strict()
       .optional(),
@@ -195,9 +227,8 @@ const normalizeManifest = (manifest: ManifestInput): ProjectDeclaration => {
               database: {
                 provider: environment.database.provider,
                 projectRef: environment.database.project_ref,
-                ...(environment.database.migrations
-                  ? { migrationDirectory: environment.database.migrations.directory }
-                  : {}),
+                migrationDirectory:
+                  environment.database.migrations?.directory ?? DEFAULT_MIGRATION_DIRECTORY,
               },
             }
           : {}),
