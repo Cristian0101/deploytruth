@@ -146,9 +146,27 @@ describe('architectural boundaries', () => {
   });
 
   it('keeps verdict evaluation out of the report viewer', () => {
-    const viewer = read('apps/web/src/report-viewer.tsx');
+    const viewer = [
+      read('apps/web/src/app.tsx'),
+      read('apps/web/src/components/truth-map.tsx'),
+      read('apps/web/src/components/report-view.tsx'),
+      read('apps/web/src/components/inspector.tsx'),
+      read('apps/web/src/lib/report-presentation.ts'),
+    ].join('\n');
 
     expect(viewer).not.toContain('evaluateTruth');
     expect(viewer).not.toContain('aggregateVerdict');
+  });
+
+  it('keeps the local report server loopback-only and capability-limited', () => {
+    const server = read('packages/cli/src/open.ts');
+
+    expect(server).toContain("const LOOPBACK_HOST = '127.0.0.1'");
+    expect(server).not.toContain('0.0.0.0');
+    expect(server).not.toContain('process.env');
+    expect(server).not.toMatch(/node:child_process|\bexec\(|\bspawn\(/);
+    expect(server).toContain("url.pathname === '/api/report'");
+    expect(server).toContain("url.pathname === '/api/session'");
+    expect(server).toContain("url.pathname === '/api/rerun'");
   });
 });
