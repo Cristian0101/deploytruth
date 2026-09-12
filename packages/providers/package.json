@@ -20,6 +20,10 @@
   },
   "dependencies": {
     "@deploytruth/core": "workspace:*",
+    "pg": "^8.23.0",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }
