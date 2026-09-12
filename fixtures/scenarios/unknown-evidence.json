@@ -1,0 +1,27 @@
+{
+  "declaration": {
+    "version": 1,
+    "project": "meridia",
+    "environments": {
+      "production": {
+        "id": "production",
+        "kind": "production",
+        "source": { "provider": "github", "repository": "acme/meridia", "branch": "main" },
+        "deployment": { "provider": "vercel", "project": "meridia", "target": "production" },
+        "database": { "provider": "supabase", "projectRef": "proddbx" },
+        "runtime": { "url": "https://meridia.example.com/api/deploytruth/runtime" },
+        "checks": {
+          "remote_source": true,
+          "deployment_sha": true,
+          "runtime_identity": true,
+          "migrations": true
+        }
+      }
+    }
+  },
+  "observations": {
+    "project": "meridia",
+    "environments": { "production": { "environment": "production" } }
+  },
+  "generatedAt": "2026-09-12T19:30:00Z"
+}
