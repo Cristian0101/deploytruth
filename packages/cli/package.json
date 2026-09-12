@@ -12,7 +12,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "pnpm run build:web && pnpm run build:cli && pnpm run copy:web",
+    "build:web": "pnpm --filter @deploytruth/web build",
+    "build:cli": "tsup src/index.ts --format esm --dts --clean",
+    "copy:web": "node scripts/copy-web.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -20,6 +23,7 @@
     "@deploytruth/core": "workspace:*",
     "@deploytruth/providers": "workspace:*",
     "@deploytruth/reporter": "workspace:*",
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "open": "^11.0.3"
   }
 }

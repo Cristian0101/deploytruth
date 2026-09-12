@@ -5,6 +5,7 @@ export default defineConfig({
   outputDir: './work/playwright',
   use: {
     baseURL: 'http://127.0.0.1:4173',
+    viewport: { width: 1680, height: 1260 },
     trace: 'retain-on-failure',
   },
   webServer: {
@@ -12,5 +13,10 @@ export default defineConfig({
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1680, height: 1260 } },
+    },
+  ],
 });

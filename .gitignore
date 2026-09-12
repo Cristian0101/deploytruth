@@ -4,8 +4,9 @@ coverage/
 playwright-report/
 test-results/
 work/playwright/
+output/playwright/
 .DS_Store
-.deploytruth/reports/
+**/.deploytruth/reports/
 .env
 .env.*
 !.env.example

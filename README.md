@@ -69,12 +69,17 @@ Git. A smaller declaration is available at
 ```bash
 node packages/cli/dist/index.js doctor --config deploytruth.yml
 node packages/cli/dist/index.js check --config deploytruth.yml --environment production
+node packages/cli/dist/index.js open --config deploytruth.yml --environment production
 ```
 
 `doctor` validates configuration and provider access. `check` compares local Git, authoritative
 GitHub source, Vercel production deployment, fresh runtime attestation, runtime Supabase target and
 connectivity, Supabase project/database identity, and committed migration history. Output is PASS,
 WARN, or FAIL with evidence-backed findings.
+
+`open` serves the same normalized report as a loopback-only Truth Map, Inspector, and detailed
+Report view. See the [local visual report](docs/local-visual-report.md) for live, `--no-open`, saved
+report, rerun, shutdown, and security behavior.
 
 ## Security model
 
@@ -112,6 +117,7 @@ target.
 
 - M1–M5: local Git, GitHub, Vercel, Supabase identity/migrations, and fresh runtime connection
   truth — implemented.
+- M6: loopback-only visual Truth Map, evidence Inspector, and local report UX — implemented.
 - Later: expand provider coverage and harden the pre-1.0 CLI based on real-world use.
 
 DeployTruth is not yet published to npm and does not claim production maturity.
