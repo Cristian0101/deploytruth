@@ -1,10 +1,7 @@
 import type { ReadOnlyTransport } from '../contracts.js';
-import { createReadOnlyFetchTransport, TransportError } from '../readonly-fetch.js';
+import { createReadOnlyFetchTransport } from '../readonly-fetch.js';
 
-export type { TransportErrorCode } from '../readonly-fetch.js';
-export { TransportError };
-
-export interface GitHubTransportOptions {
+export interface VercelTransportOptions {
   /**
    * Bearer token held inside the transport closure. It is applied to outbound requests only —
    * never exposed on the request object seen by adapters, errors, or return values.
@@ -15,16 +12,16 @@ export interface GitHubTransportOptions {
   readonly timeoutMs?: number;
 }
 
-const GITHUB_ACCEPT = 'application/vnd.github+json';
-const GITHUB_API_VERSION = '2022-11-28';
+const VERCEL_ACCEPT = 'application/json';
 const USER_AGENT = 'deploytruth/0.1';
 
 /**
- * The GitHub REST transport. It issues GET requests only — the contract type exposes no other
- * method, and no other verb appears in this implementation. Credential material lives in the
- * shared transport closure; raw `Response` objects never leave it.
+ * The Vercel REST transport. It issues GET requests only — the contract type exposes no other
+ * method, and no other verb appears in this implementation. Vercel mutation endpoints are
+ * unreachable through it by construction. Credential material lives in the shared transport
+ * closure; raw `Response` objects never leave it.
  */
-export const createGitHubTransport = (options: GitHubTransportOptions = {}): ReadOnlyTransport =>
+export const createVercelTransport = (options: VercelTransportOptions = {}): ReadOnlyTransport =>
   createReadOnlyFetchTransport({
     ...(options.token !== undefined ? { token: options.token } : {}),
     ...(options.fetchImplementation !== undefined
@@ -32,8 +29,7 @@ export const createGitHubTransport = (options: GitHubTransportOptions = {}): Rea
       : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     headers: {
-      accept: GITHUB_ACCEPT,
+      accept: VERCEL_ACCEPT,
       'user-agent': USER_AGENT,
-      'x-github-api-version': GITHUB_API_VERSION,
     },
   });
