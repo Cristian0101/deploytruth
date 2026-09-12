@@ -12,6 +12,7 @@ environments:
     deployment:
       provider: vercel
       project: my-app
+      target: production
     database:
       provider: supabase
       project_ref: replace-with-project-ref

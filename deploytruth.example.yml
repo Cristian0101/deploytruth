@@ -12,7 +12,8 @@ environments:
     deployment:
       provider: vercel
       project: meridia
-      stable_domain: https://meridia.example.com
+      target: production
+      domain: meridia.example.com
     database:
       provider: supabase
       project_ref: prodabc123

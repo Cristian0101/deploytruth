@@ -22,6 +22,19 @@ export const GITHUB_REPOSITORY_PATTERN =
 /** A safe Git branch-name subset: blocks `..`, `//`, and trailing `/` or `.`. */
 export const GIT_BRANCH_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,254})$/;
 
+/**
+ * A Vercel project name or id (`prj_...`). Names are lowercase alphanumeric with `.`, `_`, and
+ * `-`; ids carry a `prj_` prefix. The grammar is a safe URL-path segment either way.
+ */
+export const VERCEL_PROJECT_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/;
+
+/** A Vercel team slug or `team_...` id; a single optional scope field covers both. */
+export const VERCEL_SCOPE_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,127})$/;
+
+/** A bare hostname (no scheme, port, or path), normalized to lowercase before validation. */
+export const HOSTNAME_PATTERN =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 const sourceInputSchema = z
   .object({
     provider: z.literal('github'),
@@ -52,8 +65,26 @@ const sourceInputSchema = z
 const deploymentInputSchema = z
   .object({
     provider: z.literal('vercel'),
-    project: z.string().min(1),
-    stable_domain: z.string().url().optional(),
+    project: z
+      .string()
+      .regex(
+        VERCEL_PROJECT_PATTERN,
+        'project must be a Vercel project name or id (letters, digits, . _ -)',
+      ),
+    // Only the production target is supported in M3; preview targets arrive in a later milestone.
+    target: z.literal('production').default('production'),
+    scope: z
+      .string()
+      .regex(
+        VERCEL_SCOPE_PATTERN,
+        'scope must be a Vercel team slug or team_... id (letters, digits, _ -)',
+      )
+      .optional(),
+    domain: z
+      .string()
+      .toLowerCase()
+      .regex(HOSTNAME_PATTERN, 'domain must be a bare hostname (for example app.example.com)')
+      .optional(),
   })
   .strict();
 
@@ -153,9 +184,9 @@ const normalizeManifest = (manifest: ManifestInput): ProjectDeclaration => {
               deployment: {
                 provider: environment.deployment.provider,
                 project: environment.deployment.project,
-                ...(environment.deployment.stable_domain
-                  ? { stableDomain: environment.deployment.stable_domain }
-                  : {}),
+                target: environment.deployment.target,
+                ...(environment.deployment.scope ? { scope: environment.deployment.scope } : {}),
+                ...(environment.deployment.domain ? { domain: environment.deployment.domain } : {}),
               },
             }
           : {}),
