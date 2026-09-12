@@ -9,16 +9,26 @@ import {
   loadDeployTruthManifest,
   supportedManifestProviders,
 } from '@deploytruth/config';
-import { redactText, type DeploymentObservation, type SourceObservation } from '@deploytruth/core';
+import {
+  redactText,
+  type DatabaseObservation,
+  type DeploymentObservation,
+  type MigrationCatalogObservation,
+  type SourceObservation,
+} from '@deploytruth/core';
 import {
   createGitHubProvider,
+  createGitMigrationCatalogProvider,
+  createSupabaseProvider,
   createVercelProvider,
   localGitProvider,
   resolveGitHubCredential,
   resolveVercelCredential,
   type GitHubSourceConfig,
+  type GitMigrationCatalogConfig,
   type LocalGitConfig,
   type ProviderDiagnostic,
+  type SupabaseDatabaseConfig,
   type TruthProvider,
   type VercelDeploymentConfig,
 } from '@deploytruth/providers';
@@ -67,6 +77,11 @@ export interface CliDependencies {
   readonly gitProvider?: TruthProvider<LocalGitConfig, SourceObservation>;
   readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
   readonly vercelProvider?: TruthProvider<VercelDeploymentConfig, DeploymentObservation>;
+  readonly supabaseProvider?: TruthProvider<SupabaseDatabaseConfig, DatabaseObservation>;
+  readonly migrationCatalogProvider?: TruthProvider<
+    GitMigrationCatalogConfig,
+    MigrationCatalogObservation
+  >;
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -219,9 +234,66 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }),
         );
 
-        const hasError = [...gitDiagnostics, ...githubDiagnostics, ...vercelDiagnostics].some(
-          ({ diagnostics }) => diagnostics.some((entry) => entry.status === 'error'),
+        const supabaseDiagnostics = await Promise.all(
+          environmentIds
+            .filter((id) => manifest.environments[id]?.database?.provider === 'supabase')
+            .map(async (id) => {
+              const declared = manifest.environments[id]?.database;
+              const diagnostics: ProviderDiagnostic[] = [];
+              if (declared === undefined) {
+                return { environment: id, diagnostics };
+              }
+              const supabaseProvider =
+                dependencies.supabaseProvider ?? createSupabaseProvider({ env });
+              const catalogProvider =
+                dependencies.migrationCatalogProvider ?? createGitMigrationCatalogProvider();
+              try {
+                const config = supabaseProvider.validateConfig({
+                  projectRef: declared.projectRef,
+                });
+                const results = await supabaseProvider.diagnose?.({
+                  project: manifest.project,
+                  environment: id,
+                  config,
+                });
+                diagnostics.push(...(results ?? []));
+              } catch (error) {
+                diagnostics.push({
+                  code: 'SUPABASE_CONFIG',
+                  title: 'Supabase configuration',
+                  status: 'error',
+                  message: safeErrorMessage(error),
+                });
+              }
+              try {
+                const catalogConfig = catalogProvider.validateConfig({
+                  directory: dirname(configPath),
+                  migrationDirectory: declared.migrationDirectory,
+                });
+                const results = await catalogProvider.diagnose?.({
+                  project: manifest.project,
+                  environment: id,
+                  config: catalogConfig,
+                });
+                diagnostics.push(...(results ?? []));
+              } catch (error) {
+                diagnostics.push({
+                  code: 'MIGRATION_CATALOG_CONFIG',
+                  title: 'Migration catalog',
+                  status: 'error',
+                  message: safeErrorMessage(error),
+                });
+              }
+              return { environment: id, diagnostics };
+            }),
         );
+
+        const hasError = [
+          ...gitDiagnostics,
+          ...githubDiagnostics,
+          ...vercelDiagnostics,
+          ...supabaseDiagnostics,
+        ].some(({ diagnostics }) => diagnostics.some((entry) => entry.status === 'error'));
         const result = {
           status: hasError ? 'DEGRADED' : 'VALID',
           project: manifest.project,
@@ -237,7 +309,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             vercel: vercelDiagnostics.flatMap(({ environment, diagnostics }) =>
               diagnostics.map((entry) => ({ environment, ...entry })),
             ),
-            database: 'NOT_IMPLEMENTED',
+            supabase: supabaseDiagnostics.flatMap(({ environment, diagnostics }) =>
+              diagnostics.map((entry) => ({ environment, ...entry })),
+            ),
             runtime: 'NOT_IMPLEMENTED',
           },
         };
@@ -254,6 +328,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             ...gitDiagnostics,
             ...githubDiagnostics,
             ...vercelDiagnostics,
+            ...supabaseDiagnostics,
           ]) {
             for (const entry of diagnostics) {
               const marker =
@@ -262,7 +337,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }
           }
           console.log(
-            'Local Git, GitHub source, and Vercel deployment observation are active. Database and runtime providers are not implemented yet.',
+            'Local Git, GitHub source, Vercel deployment, and Supabase database observation are active. Runtime providers are not implemented yet.',
           );
         }
         if (hasError) {
@@ -298,6 +373,12 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             : {}),
           ...(dependencies.vercelProvider !== undefined
             ? { vercelProvider: dependencies.vercelProvider }
+            : {}),
+          ...(dependencies.supabaseProvider !== undefined
+            ? { supabaseProvider: dependencies.supabaseProvider }
+            : {}),
+          ...(dependencies.migrationCatalogProvider !== undefined
+            ? { migrationCatalogProvider: dependencies.migrationCatalogProvider }
             : {}),
           env,
         });

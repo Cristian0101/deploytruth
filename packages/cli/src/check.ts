@@ -3,8 +3,10 @@ import { dirname } from 'node:path';
 import {
   evaluateTruth,
   redactText,
+  type DatabaseObservation,
   type DeploymentObservation,
   type EnvironmentTruth,
+  type MigrationCatalogObservation,
   type ProjectDeclaration,
   type SourceObservation,
   type TruthReport,
@@ -13,11 +15,15 @@ import { ConfigError, loadDeployTruthManifest } from '@deploytruth/config';
 import {
   GitError,
   createGitHubProvider,
+  createGitMigrationCatalogProvider,
+  createSupabaseProvider,
   createVercelProvider,
   localGitProvider,
   type GitHubSourceConfig,
+  type GitMigrationCatalogConfig,
   type TruthProvider,
   type LocalGitConfig,
+  type SupabaseDatabaseConfig,
   type VercelDeploymentConfig,
 } from '@deploytruth/providers';
 
@@ -31,6 +37,13 @@ export interface CheckOptions {
   readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
   /** Injectable for tests; defaults to a Vercel adapter over the live GET-only transport. */
   readonly vercelProvider?: TruthProvider<VercelDeploymentConfig, DeploymentObservation>;
+  /** Injectable for tests; defaults to a Supabase adapter over the live GET-only transport. */
+  readonly supabaseProvider?: TruthProvider<SupabaseDatabaseConfig, DatabaseObservation>;
+  /** Injectable for tests; defaults to the Git ls-tree migration catalog reader. */
+  readonly migrationCatalogProvider?: TruthProvider<
+    GitMigrationCatalogConfig,
+    MigrationCatalogObservation
+  >;
   /** Environment for credential resolution; defaults to process.env. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -170,9 +183,85 @@ const observeVercel = async (
   }
 };
 
+const observeSupabase = async (
+  provider: TruthProvider<SupabaseDatabaseConfig, DatabaseObservation>,
+  context: {
+    project: string;
+    environment: string;
+    database: { projectRef: string };
+    signal?: AbortSignal;
+  },
+): Promise<{ observation?: DatabaseObservation; diagnostic?: string }> => {
+  let config: SupabaseDatabaseConfig;
+  try {
+    config = provider.validateConfig({ projectRef: context.database.projectRef });
+  } catch {
+    return {
+      diagnostic:
+        'Invalid Supabase database declaration; expected a project ref (lowercase letters and digits).',
+    };
+  }
+
+  try {
+    const observation = await provider.observe({
+      project: context.project,
+      environment: context.environment,
+      config,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return { observation };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown Supabase observation failure';
+    return { diagnostic: redactText(message) };
+  }
+};
+
+const observeMigrationCatalog = async (
+  provider: TruthProvider<GitMigrationCatalogConfig, MigrationCatalogObservation>,
+  context: {
+    project: string;
+    environment: string;
+    directory: string;
+    migrationDirectory: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ observation?: MigrationCatalogObservation; diagnostic?: string }> => {
+  let config: GitMigrationCatalogConfig;
+  try {
+    config = provider.validateConfig({
+      directory: context.directory,
+      migrationDirectory: context.migrationDirectory,
+    });
+  } catch {
+    return {
+      diagnostic:
+        'Invalid migration directory declaration; expected a repository-relative path of safe segments.',
+    };
+  }
+
+  try {
+    const observation = await provider.observe({
+      project: context.project,
+      environment: context.environment,
+      config,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return { observation };
+  } catch (error) {
+    const message =
+      error instanceof GitError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : 'Unknown migration catalog observation failure';
+    return { diagnostic: redactText(message) };
+  }
+};
+
 /**
  * Loads the manifest, observes local Git truth, remote-authoritative source truth (GitHub when
- * declared), and deployment truth (Vercel when declared) for the selected environment, then
+ * declared), deployment truth (Vercel when declared), and database truth (Supabase when
+ * declared, plus the committed migration catalog) for the selected environment, then
  * evaluates the deterministic rule set. Missing provider evidence remains an explicit
  * UNKNOWN/WARN signal; it never produces a false PASS.
  */
@@ -185,8 +274,51 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
   let source: SourceObservation | undefined;
   let remoteSource: SourceObservation | undefined;
   let deployment: DeploymentObservation | undefined;
+  let database: DatabaseObservation | undefined;
+  let repositoryMigrations: MigrationCatalogObservation | undefined;
 
   const pending: Promise<void>[] = [];
+
+  if (environment?.database !== undefined && environment.database.provider === 'supabase') {
+    const declared = environment.database;
+    const supabaseProvider =
+      options.supabaseProvider ??
+      createSupabaseProvider({
+        ...(options.env !== undefined ? { env: options.env } : {}),
+      });
+    pending.push(
+      observeSupabase(supabaseProvider, {
+        project: manifest.project,
+        environment: environmentId,
+        database: { projectRef: declared.projectRef },
+      }).then((result) => {
+        database = result.observation;
+        if (result.diagnostic !== undefined) {
+          diagnostics.push(`supabase: ${result.diagnostic}`);
+        }
+      }),
+    );
+  }
+
+  if (environment?.database?.migrationDirectory !== undefined) {
+    const declared = environment.database;
+    pending.push(
+      observeMigrationCatalog(
+        options.migrationCatalogProvider ?? createGitMigrationCatalogProvider(),
+        {
+          project: manifest.project,
+          environment: environmentId,
+          directory: dirname(options.configPath),
+          migrationDirectory: declared.migrationDirectory ?? 'supabase/migrations',
+        },
+      ).then((result) => {
+        repositoryMigrations = result.observation;
+        if (result.diagnostic !== undefined) {
+          diagnostics.push(`migrations: ${result.diagnostic}`);
+        }
+      }),
+    );
+  }
 
   if (environment?.deployment !== undefined && environment.deployment.provider === 'vercel') {
     const declared = environment.deployment;
@@ -273,6 +405,8 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
             ...(source !== undefined ? { source } : {}),
             ...(remoteSource !== undefined ? { remoteSource } : {}),
             ...(deployment !== undefined ? { deployment } : {}),
+            ...(database !== undefined ? { database } : {}),
+            ...(repositoryMigrations !== undefined ? { repositoryMigrations } : {}),
           },
         },
       },
@@ -522,6 +656,139 @@ const formatDeploymentTruthSummary = (truth: EnvironmentTruth): readonly string[
     : [];
 };
 
+const formatSupabaseSection = (
+  truth: EnvironmentTruth,
+  diagnostics: readonly string[],
+): readonly string[] => {
+  const database = truth.observation?.database;
+  const lines = ['  Supabase'];
+  const declared = truth.declaration.database;
+
+  if (database === undefined) {
+    const reason =
+      diagnostics
+        .find((entry) => entry.startsWith('supabase:'))
+        ?.slice('supabase:'.length)
+        .trim() ?? 'no Supabase observation available';
+    lines.push(subRow('Status', `NOT OBSERVED — ${reason}`));
+    return lines;
+  }
+
+  lines.push(subRow('Declared project', database.projectRef ?? declared?.projectRef ?? 'unknown'));
+
+  const controlPlane = database.controlPlane;
+  if (controlPlane?.state === 'available') {
+    const facts = [controlPlane.projectName, controlPlane.region, controlPlane.status].filter(
+      (part): part is string => part !== undefined,
+    );
+    lines.push(
+      subRow('Project access', `AVAILABLE${facts.length > 0 ? ` (${facts.join(' · ')})` : ''}`),
+    );
+  } else {
+    lines.push(
+      subRow(
+        'Project access',
+        `UNAVAILABLE — ${controlPlane?.detail ?? controlPlane?.reason ?? 'not observed'}`,
+      ),
+    );
+  }
+
+  const connection = database.connection;
+  if (connection?.state === 'available') {
+    lines.push(
+      subRow(
+        'Connection',
+        `AVAILABLE${connection.identitySource !== undefined ? ` (identity via ${connection.identitySource})` : ''}`,
+      ),
+    );
+    if (database.identity === 'verified') {
+      lines.push(subRow('Database identity', `VERIFIED — ${database.observedProjectRef}`));
+    } else if (database.identity === 'mismatch') {
+      lines.push(
+        subRow(
+          'Database identity',
+          `MISMATCH — observed ${database.observedProjectRef ?? 'unknown'}, declared ${database.projectRef ?? declared?.projectRef ?? 'unknown'}`,
+        ),
+      );
+    } else {
+      lines.push(
+        subRow('Database identity', 'UNVERIFIED — endpoint does not expose a project ref'),
+      );
+    }
+  } else {
+    lines.push(
+      subRow(
+        'Connection',
+        `UNAVAILABLE — ${connection?.detail ?? connection?.reason ?? 'not observed'}`,
+      ),
+    );
+    lines.push(subRow('Database identity', 'NOT OBSERVED'));
+  }
+
+  const catalog = truth.observation?.repositoryMigrations;
+  if (catalog === undefined) {
+    lines.push(subRow('Migration source', 'NOT OBSERVED'));
+  } else if (catalog.availability?.state === 'available') {
+    lines.push(
+      subRow('Migration source', `Git ${shortSha(catalog.sourceSha)} (${catalog.directory})`),
+    );
+    lines.push(subRow('Expected migrations', String(catalog.migrationIds.length)));
+  } else {
+    lines.push(
+      subRow(
+        'Migration source',
+        `UNAVAILABLE — ${catalog.availability?.detail ?? catalog.availability?.reason ?? 'unknown'}`,
+      ),
+    );
+  }
+
+  const history = database.migrationHistory;
+  if (history?.state === 'available') {
+    lines.push(subRow('Applied migrations', String(database.appliedMigrationIds.length)));
+  } else if (history !== undefined) {
+    lines.push(
+      subRow('Migration history', `UNAVAILABLE — ${history.detail ?? history.reason ?? 'unknown'}`),
+    );
+  } else {
+    lines.push(subRow('Migration history', 'NOT OBSERVED'));
+  }
+
+  return lines;
+};
+
+/**
+ * Migration history is VERIFIED only when the expected catalog is authoritative for the
+ * declared source, the observed database is provably the declared project, history was
+ * actually read, and the version sets match exactly. Anything less is never claimed.
+ */
+const formatDatabaseTruthSummary = (truth: EnvironmentTruth): readonly string[] => {
+  const database = truth.observation?.database;
+  const catalog = truth.observation?.repositoryMigrations;
+  const remote = truth.observation?.remoteSource;
+  const remoteDeclared = truth.declaration.source !== undefined;
+  const sourceAuthoritative =
+    catalog?.availability?.state === 'available' &&
+    (!remoteDeclared ||
+      (remote?.availability?.state === 'available' &&
+        remote.remoteHeadSha !== undefined &&
+        catalog.sourceSha === remote.remoteHeadSha));
+  const verified =
+    sourceAuthoritative &&
+    database?.identity === 'verified' &&
+    database.migrationHistory?.state === 'available' &&
+    catalog !== undefined &&
+    catalog.migrationIds.length === database.appliedMigrationIds.length &&
+    catalog.migrationIds.every((id) => database.appliedMigrationIds.includes(id));
+  return verified
+    ? [
+        row(
+          'Database truth',
+          `MIGRATIONS VERIFIED — ${database?.appliedMigrationIds.length} applied migration(s) match ${catalog?.directory ?? 'source'}`,
+        ),
+      ]
+    : [];
+};
+
 const notCheckedSection = (title: string, provider: string): readonly string[] => [
   title,
   row(provider, 'NOT CHECKED (adapter not implemented)'),
@@ -562,7 +829,16 @@ export const formatCheckReport = (execution: CheckExecution): string => {
     }
   }
   if (environment.database !== undefined) {
-    lines.push(...notCheckedSection('DATABASE', environment.database.provider), '');
+    if (environment.database.provider === 'supabase') {
+      lines.push(
+        'DATABASE',
+        ...formatSupabaseSection(truth, execution.diagnostics),
+        ...formatDatabaseTruthSummary(truth),
+        '',
+      );
+    } else {
+      lines.push(...notCheckedSection('DATABASE', environment.database.provider), '');
+    }
   }
   if (environment.runtime !== undefined) {
     lines.push(...notCheckedSection('RUNTIME', 'runtime endpoint'), '');
