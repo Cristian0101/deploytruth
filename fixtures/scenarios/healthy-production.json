@@ -6,7 +6,11 @@
       "production": {
         "id": "production",
         "kind": "production",
-        "source": { "provider": "github", "repository": "acme/meridia", "branch": "main" },
+        "source": {
+          "provider": "github",
+          "repository": "acme/meridia",
+          "branch": "main"
+        },
         "deployment": {
           "provider": "vercel",
           "project": "meridia",
@@ -15,7 +19,7 @@
         },
         "database": {
           "provider": "supabase",
-          "projectRef": "prod-db",
+          "projectRef": "proddbx",
           "migrationDirectory": "supabase/migrations"
         },
         "runtime": {
@@ -62,11 +66,15 @@
           "branch": "main",
           "remoteHeadSha": "abc123",
           "defaultBranch": "main",
-          "availability": { "state": "available" }
+          "availability": {
+            "state": "available"
+          }
         },
         "deployment": {
           "provider": "vercel",
-          "availability": { "state": "available" },
+          "availability": {
+            "state": "available"
+          },
           "project": "meridia",
           "target": "production",
           "environment": "production",
@@ -80,17 +88,44 @@
           "stableDomain": "meridia.example.com",
           "stableDomainVerified": true,
           "connectedResources": [
-            { "type": "database", "provider": "supabase", "identifier": "prod-db" }
+            {
+              "type": "database",
+              "provider": "supabase",
+              "identifier": "proddbx"
+            }
           ],
           "environmentVariables": [
-            { "name": "SUPABASE_URL", "present": true, "fingerprint": "8fd4e1a2…91c2" },
-            { "name": "NEXT_PUBLIC_SUPABASE_URL", "present": true, "fingerprint": "7cb7e1b0…aaa1" }
+            {
+              "name": "SUPABASE_URL",
+              "present": true,
+              "fingerprint": "8fd4e1a2\u202691c2"
+            },
+            {
+              "name": "NEXT_PUBLIC_SUPABASE_URL",
+              "present": true,
+              "fingerprint": "7cb7e1b0\u2026aaa1"
+            }
           ]
         },
         "database": {
           "provider": "supabase",
-          "projectRef": "prod-db",
-          "appliedMigrationIds": ["001_init", "002_profiles"]
+          "projectRef": "proddbx",
+          "controlPlane": {
+            "state": "available",
+            "projectName": "meridia-prod",
+            "region": "us-east-1",
+            "status": "healthy"
+          },
+          "connection": {
+            "state": "available",
+            "identitySource": "direct_host"
+          },
+          "observedProjectRef": "proddbx",
+          "identity": "verified",
+          "appliedMigrationIds": ["001_init", "002_profiles"],
+          "migrationHistory": {
+            "state": "available"
+          }
         },
         "runtime": {
           "url": "https://meridia.example.com/api/version",
@@ -102,7 +137,12 @@
         },
         "repositoryMigrations": {
           "directory": "supabase/migrations",
-          "migrationIds": ["001_init", "002_profiles"]
+          "migrationIds": ["001_init", "002_profiles"],
+          "sourceSha": "abc123",
+          "origin": "git-tree",
+          "availability": {
+            "state": "available"
+          }
         }
       }
     }

@@ -75,6 +75,52 @@ describe('architectural boundaries', () => {
     expect(source).not.toMatch(/api\.github\.com|octokit|Authorization|Bearer/i);
   });
 
+  it('keeps the Supabase runtime read-only and free of credential material at the boundary', () => {
+    const supabase = [
+      read('packages/providers/src/supabase/transport.ts'),
+      read('packages/providers/src/supabase/adapter.ts'),
+      read('packages/providers/src/supabase/credentials.ts'),
+      read('packages/providers/src/supabase/identity.ts'),
+    ].join('\n');
+
+    // No mutation verbs may exist anywhere in the Supabase runtime path.
+    expect(supabase).not.toMatch(/\bpost\b|\bput\b|\bpatch\b|\bdelete\b/i);
+    expect(supabase).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
+    // No credential-bearing connection strings may be embedded in source.
+    expect(supabase).not.toMatch(/:\/\/[^/'\s"]*:[^/@'\s"]+@/);
+  });
+
+  it('confines the PostgreSQL reader to allowlisted read-only statements', () => {
+    const reader = read('packages/providers/src/supabase/database-reader.ts');
+
+    // The only SQL the reader may issue: an explicit READ ONLY transaction, a connectivity
+    // probe, the migration-history SELECT, and ROLLBACK. No write-capable statement may
+    // appear anywhere in the file — even inside dead code or comments.
+    expect(reader).not.toMatch(
+      /\b(INSERT|UPDATE|DELETE|UPSERT|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|MERGE|CALL|EXECUTE)\b/,
+    );
+    expect(reader).toContain('START TRANSACTION READ ONLY');
+    expect(reader).toContain('ROLLBACK');
+    expect(reader).toContain('SELECT version FROM supabase_migrations.schema_migrations');
+    // The reader exposes facts, not a query surface.
+    expect(reader).not.toContain('query(text: string, params');
+    expect(reader).toContain('inspectIdentity');
+    expect(reader).toContain('readMigrationHistory');
+  });
+
+  it('keeps raw Supabase concerns out of core', () => {
+    const source = [
+      read('packages/core/src/domain.ts'),
+      read('packages/core/src/rules.ts'),
+      read('packages/core/src/report.ts'),
+      read('packages/core/src/topology.ts'),
+    ].join('\n');
+
+    expect(source).not.toMatch(/api\.supabase\.com|schema_migrations|postgresql:|Bearer/i);
+    // Variable names in remediation text are safe; token-shaped values are not.
+    expect(source).not.toMatch(/sbp_[A-Za-z0-9]{8,}/);
+  });
+
   it('keeps verdict evaluation out of the report viewer', () => {
     const viewer = read('apps/web/src/report-viewer.tsx');
 

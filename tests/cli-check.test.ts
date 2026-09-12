@@ -17,6 +17,10 @@ import {
   write,
 } from './git-test-utils.js';
 import { createFixtureGitHubProvider } from './github-test-utils.js';
+import {
+  createFixtureMigrationCatalogProvider,
+  createFixtureSupabaseProvider,
+} from './supabase-test-utils.js';
 
 const MANIFEST = `version: 1
 project: example
@@ -25,7 +29,7 @@ environments:
     kind: production
     source: { provider: github, repository: example/example-app, branch: main }
     deployment: { provider: vercel, project: example-app }
-    database: { provider: supabase, project_ref: prod-ref }
+    database: { provider: supabase, project_ref: prodabc123 }
 `;
 
 const manifestAt = (directory: string): string => {
@@ -37,7 +41,7 @@ const manifestAt = (directory: string): string => {
 afterEach(cleanupTempDirs);
 
 describe('deploytruth check --environment', () => {
-  it('incorporates real local Git truth and stays WARN while providers are unimplemented', async () => {
+  it('incorporates real local Git truth and stays WARN while runtime providers are unimplemented', async () => {
     const dir = initRepo(tempDir('dt-check-clean-'));
     const head = git(['rev-parse', 'HEAD'], dir);
     configureUpstream(dir, head);
@@ -46,6 +50,11 @@ describe('deploytruth check --environment', () => {
       configPath: manifestAt(dir),
       environmentName: 'production',
       githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+      supabaseProvider: createFixtureSupabaseProvider(),
+      migrationCatalogProvider: createFixtureMigrationCatalogProvider({
+        sourceSha: head,
+        migrationIds: [],
+      }),
     });
     const report = execution.report;
 
@@ -62,6 +71,11 @@ describe('deploytruth check --environment', () => {
     const remote = report.environments[0]?.observation?.remoteSource;
     expect(remote?.provider).toBe('github');
     expect(remote?.remoteHeadSha).toBe(head);
+    // The Supabase observation is a real evidence object, not a stub section.
+    const database = report.environments[0]?.observation?.database;
+    expect(database?.provider).toBe('supabase');
+    expect(database?.identity).toBe('verified');
+    expect(report.environments[0]?.observation?.repositoryMigrations?.sourceSha).toBe(head);
 
     const output = formatCheckReport(execution);
     expect(output).toContain('Git repository');
@@ -69,8 +83,10 @@ describe('deploytruth check --environment', () => {
     expect(output).toContain('local ref; remote unverified');
     expect(output).toContain('GitHub');
     expect(output).toContain('Authoritative SHA');
+    expect(output).toContain('DATABASE');
+    expect(output).toContain('Supabase');
+    expect(output).toContain('Database identity');
     expect(output).toContain('VERIFIED');
-    expect(output).toContain('NOT CHECKED');
     expect(output).toContain('WARN');
   });
 
@@ -80,6 +96,7 @@ describe('deploytruth check --environment', () => {
       configPath: manifestAt(dir),
       environmentName: 'production',
       githubProvider: createFixtureGitHubProvider(),
+      supabaseProvider: createFixtureSupabaseProvider(),
     });
 
     expect(execution.report.verdict).toBe('WARN');
@@ -102,6 +119,7 @@ describe('deploytruth check --environment', () => {
       configPath: manifestAt(dir),
       environmentName: 'production',
       githubProvider: createFixtureGitHubProvider({ remoteSha: base }),
+      supabaseProvider: createFixtureSupabaseProvider(),
     });
     const codes = execution.report.findings.map((finding) => finding.code);
 
@@ -119,6 +137,7 @@ describe('deploytruth check --environment', () => {
       githubProvider: createFixtureGitHubProvider({
         remoteSha: git(['rev-parse', 'HEAD'], dir),
       }),
+      supabaseProvider: createFixtureSupabaseProvider(),
     });
 
     expect(execution.report.strict).toBe(true);
@@ -145,6 +164,7 @@ describe('deploytruth check --environment', () => {
       githubProvider: createFixtureGitHubProvider({
         remoteSha: git(['rev-parse', 'HEAD'], dir),
       }),
+      supabaseProvider: createFixtureSupabaseProvider(),
     });
 
     const serialized = serializeTruthReport(execution.report);
@@ -178,6 +198,7 @@ describe('deploytruth check --environment', () => {
     try {
       await createCli({
         githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+        supabaseProvider: createFixtureSupabaseProvider(),
       }).parseAsync([
         'node',
         'deploytruth',

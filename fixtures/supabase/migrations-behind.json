@@ -1,5 +1,20 @@
 {
   "provider": "supabase",
-  "projectRef": "prod-db",
-  "appliedMigrationIds": ["001_init"]
+  "projectRef": "prodmeridia",
+  "controlPlane": {
+    "state": "available",
+    "projectName": "meridia-prod",
+    "region": "us-east-1",
+    "status": "healthy"
+  },
+  "connection": {
+    "state": "available",
+    "identitySource": "direct_host"
+  },
+  "observedProjectRef": "prodmeridia",
+  "identity": "verified",
+  "appliedMigrationIds": ["20240101000000"],
+  "migrationHistory": {
+    "state": "available"
+  }
 }

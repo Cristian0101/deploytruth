@@ -34,6 +34,26 @@ describe('secret redaction', () => {
     expect(serialized).toContain('"present":true');
   });
 
+  it('redacts credential-bearing database URLs and Supabase tokens from report text', () => {
+    const databaseUrl =
+      'postgresql://postgres:database-password-123@db.prodabc123.supabase.co:5432/postgres';
+    const base = evaluateTruth(loadScenario('healthy-production'));
+    const report = {
+      ...base,
+      metadata: {
+        ...base.metadata,
+        rawDatabaseUrl: databaseUrl,
+        supabaseAccessToken: 'sbp_1234567890abcdef1234567890abcdef',
+      },
+    };
+    const serialized = serializeTruthReport(report);
+
+    expect(serialized).not.toContain('database-password-123');
+    expect(serialized).not.toContain('sbp_1234567890abcdef1234567890abcdef');
+    expect(serialized).not.toContain('postgres:database');
+    expect(() => JSON.parse(serialized)).not.toThrow();
+  });
+
   it('cannot leak common secret formats through serialized reports', () => {
     const healthyReport = evaluateTruth(loadScenario('healthy-production'));
     const report = {
