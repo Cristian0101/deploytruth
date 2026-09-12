@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible DeployTruth defect
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, customer data, private repository contents, or raw provider payloads.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: What happened, including sanitized findings and exit status?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Sanitized reproduction
+      description: Provide minimal steps and a redacted manifest if relevant.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Node.js and pnpm versions

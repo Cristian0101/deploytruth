@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Cristian0101/deploytruth/security/advisories/new
+    about: Use private vulnerability reporting; never post secrets publicly.

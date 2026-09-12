@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose an evidence-backed truth capability
+title: '[Feature]: '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What deployment uncertainty should DeployTruth resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Authoritative evidence
+      description: Which read-only provider or repository facts can establish this truth?
+    validations:
+      required: true
+  - type: textarea
+    id: unknown
+    attributes:
+      label: Honest UNKNOWN behavior
+      description: When should the proposed check refuse to claim certainty?
+    validations:
+      required: true

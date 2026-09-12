@@ -9,3 +9,4 @@ work/playwright/
 .env
 .env.*
 !.env.example
+.vercel/
