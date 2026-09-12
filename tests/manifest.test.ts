@@ -86,4 +86,89 @@ environments:
       ).toThrow(ConfigError);
     },
   );
+
+  it('accepts a Vercel production deployment declaration with scope and domain', () => {
+    const manifest = parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    deployment:
+      provider: vercel
+      project: example-app
+      target: production
+      scope: kaizora
+      domain: app.example.com
+`);
+
+    const deployment = manifest.environments.production?.deployment;
+    expect(deployment?.project).toBe('example-app');
+    expect(deployment?.target).toBe('production');
+    expect(deployment?.scope).toBe('kaizora');
+    expect(deployment?.domain).toBe('app.example.com');
+  });
+
+  it('defaults the deployment target to production when omitted', () => {
+    const manifest = parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    deployment: { provider: vercel, project: example-app }
+`);
+
+    expect(manifest.environments.production?.deployment?.target).toBe('production');
+  });
+
+  it('rejects non-production deployment targets in M3', () => {
+    expect(() =>
+      parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  preview:
+    kind: preview
+    deployment:
+      provider: vercel
+      project: example-app
+      target: preview
+`),
+    ).toThrow(ConfigError);
+  });
+
+  it.each(['https://app.example.com', 'app.example.com/x', 'white space'])(
+    'rejects non-hostname deployment domain %s',
+    (domain) => {
+      expect(() =>
+        parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    deployment:
+      provider: vercel
+      project: example-app
+      domain: "${domain}"
+`),
+      ).toThrow(ConfigError);
+    },
+  );
+
+  it('rejects malformed Vercel project identifiers', () => {
+    expect(() =>
+      parseDeployTruthManifest(`
+version: 1
+project: example
+environments:
+  production:
+    kind: production
+    deployment:
+      provider: vercel
+      project: "bad project/name"
+`),
+    ).toThrow(ConfigError);
+  });
 });

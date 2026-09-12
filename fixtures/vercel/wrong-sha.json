@@ -1,7 +1,15 @@
 {
   "provider": "vercel",
+  "availability": { "state": "available" },
   "project": "meridia",
+  "target": "production",
   "environment": "production",
+  "deploymentId": "dpl_meridia_prod_def456",
+  "deploymentUrl": "https://meridia-def456.vercel.app",
+  "state": "ready",
   "commitSha": "def456",
-  "connectedResources": []
+  "sourceBranch": "main",
+  "createdAt": "2026-09-10T17:05:00Z",
+  "connectedResources": [],
+  "environmentVariables": []
 }

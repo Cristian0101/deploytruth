@@ -37,6 +37,33 @@ describe('architectural boundaries', () => {
     expect(github).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
   });
 
+  it('keeps the Vercel runtime read-only and free of credential material at the boundary', () => {
+    const vercel = [
+      read('packages/providers/src/vercel/transport.ts'),
+      read('packages/providers/src/vercel/adapter.ts'),
+      read('packages/providers/src/vercel/credentials.ts'),
+      read('packages/providers/src/readonly-fetch.ts'),
+    ].join('\n');
+
+    // No mutation verbs may exist anywhere in the Vercel runtime path.
+    expect(vercel).not.toMatch(/\bpost\b|\bput\b|\bpatch\b|\bdelete\b/i);
+    expect(vercel).not.toMatch(/method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]/i);
+  });
+
+  it('keeps raw Vercel API concerns out of core', () => {
+    const source = [
+      read('packages/core/src/domain.ts'),
+      read('packages/core/src/rules.ts'),
+      read('packages/core/src/report.ts'),
+      read('packages/core/src/topology.ts'),
+    ].join('\n');
+
+    // Variable names in remediation text are safe; credential-shaped values are not. The token
+    // check is intentionally case-sensitive so VERCEL_* rule codes do not trip it.
+    expect(source).not.toMatch(/api\.vercel\.com|Authorization|Bearer/i);
+    expect(source).not.toMatch(/vercel_[A-Za-z0-9_-]{8,}/);
+  });
+
   it('keeps raw GitHub API concerns out of core', () => {
     const source = [
       read('packages/core/src/domain.ts'),

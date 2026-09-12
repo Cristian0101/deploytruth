@@ -1,9 +1,18 @@
 {
   "provider": "vercel",
+  "availability": { "state": "available" },
   "project": "meridia",
+  "target": "production",
   "environment": "production",
+  "deploymentId": "dpl_meridia_prod_abc123",
+  "deploymentUrl": "https://meridia-abc123.vercel.app",
+  "state": "ready",
   "commitSha": "abc123",
-  "stableDomain": "https://meridia.example.com",
+  "sourceBranch": "main",
+  "sourceRepository": "acme/meridia",
+  "createdAt": "2026-09-10T18:20:00Z",
+  "stableDomain": "meridia.example.com",
+  "stableDomainVerified": true,
   "connectedResources": [
     {
       "type": "database",
