@@ -70,6 +70,8 @@ Git. A smaller declaration is available at
 node packages/cli/dist/index.js doctor --config deploytruth.yml
 node packages/cli/dist/index.js check --config deploytruth.yml --environment production
 node packages/cli/dist/index.js open --config deploytruth.yml --environment production
+node packages/cli/dist/index.js history --config deploytruth.yml --environment production
+node packages/cli/dist/index.js diff --config deploytruth.yml --environment production
 ```
 
 `doctor` validates configuration and provider access. `check` compares local Git, authoritative
@@ -77,9 +79,10 @@ GitHub source, Vercel production deployment, fresh runtime attestation, runtime 
 connectivity, Supabase project/database identity, and committed migration history. Output is PASS,
 WARN, or FAIL with evidence-backed findings.
 
-`open` serves the same normalized report as a loopback-only Truth Map, Inspector, and detailed
-Report view. See the [local visual report](docs/local-visual-report.md) for live, `--no-open`, saved
-report, rerun, shutdown, and security behavior.
+`open` serves the same normalized report as a loopback-only Truth Map, Inspector, Report, and
+History view. `history` lists stored local runs. `diff` compares two runs semantically (latest two
+by default). See the [local visual report](docs/local-visual-report.md) and
+[report history](docs/report-history.md).
 
 ## Security model
 
@@ -104,12 +107,12 @@ target.
 
 ## Repository layout
 
-- `packages/core` — truth domain, rules, report, topology, and safety primitives.
+- `packages/core` — truth domain, rules, report, topology, comparison, and safety primitives.
 - `packages/config` — schema-first YAML manifest parser.
 - `packages/providers` — read-only GitHub, Vercel, Supabase, PostgreSQL, and Git adapters.
-- `packages/reporter` — safe report serialization and local report storage.
+- `packages/reporter` — safe report serialization and local report history.
 - `packages/cli` — command shell and orchestration.
-- `apps/web` — local report-viewer foundation; it does not evaluate rules.
+- `apps/web` — local report viewer; it does not evaluate rules or comparisons.
 - `examples/live-acceptance` — tiny GitHub → Vercel → Supabase dogfood fixture.
 - `fixtures` and `tests` — sanitized observations and deterministic certification scenarios.
 
@@ -118,6 +121,7 @@ target.
 - M1–M5: local Git, GitHub, Vercel, Supabase identity/migrations, and fresh runtime connection
   truth — implemented.
 - M6: loopback-only visual Truth Map, evidence Inspector, and local report UX — implemented.
+- M7: local report history and semantic run comparison — implemented.
 - Later: expand provider coverage and harden the pre-1.0 CLI based on real-world use.
 
 DeployTruth is not yet published to npm and does not claim production maturity.
