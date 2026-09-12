@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-export const REPORT_SCHEMA_VERSION = '0.1' as const;
+export const REPORT_SCHEMA_VERSION = '0.2' as const;
+export const LEGACY_REPORT_SCHEMA_VERSION = '0.1' as const;
 
 export const environmentKindSchema = z.enum([
   'production',
@@ -723,6 +724,10 @@ export type EnvironmentTruth = z.infer<typeof environmentTruthSchema>;
 export const truthReportSchema = z
   .object({
     schemaVersion: z.literal(REPORT_SCHEMA_VERSION),
+    /** Cryptographically unique run identity. Never array position or a timestamp alone. */
+    runId: z
+      .string()
+      .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, 'runId must be a 26-character Crockford ULID'),
     generatedAt: z.string().datetime({ offset: true }),
     project: z.string().min(1),
     strict: z.boolean(),
@@ -735,9 +740,18 @@ export const truthReportSchema = z
   .strict();
 export type TruthReport = z.infer<typeof truthReportSchema>;
 
+/** Pre-M7 reports are readable only through an additive runId migration. */
+export const legacyTruthReportSchema = truthReportSchema
+  .omit({ runId: true })
+  .extend({ schemaVersion: z.literal(LEGACY_REPORT_SCHEMA_VERSION) })
+  .strict();
+export type LegacyTruthReport = z.infer<typeof legacyTruthReportSchema>;
+
 export interface TruthContext {
   readonly declaration: ProjectDeclaration;
   readonly observations: ProjectObservation;
   readonly generatedAt: string;
   readonly strict?: boolean;
+  /** Optional stable run identity for tests; live checks generate a ULID. */
+  readonly runId?: string;
 }

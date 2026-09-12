@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   projectDeclarationSchema,
@@ -17,8 +18,15 @@ interface RawScenario {
 const isRawScenario = (value: unknown): value is RawScenario =>
   typeof value === 'object' && value !== null && 'declaration' in value && 'observations' in value;
 
+const scenariosDirectory = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'fixtures',
+  'scenarios',
+);
+
 export const loadScenario = (name: string): TruthContext => {
-  const filePath = resolve(process.cwd(), 'fixtures', 'scenarios', `${name}.json`);
+  const filePath = join(scenariosDirectory, `${name}.json`);
   const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
   if (!isRawScenario(parsed) || typeof parsed.generatedAt !== 'string') {
     throw new Error(`Scenario ${name} is malformed.`);

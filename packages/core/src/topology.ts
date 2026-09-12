@@ -31,13 +31,13 @@ const findingsFor = (
     ),
   );
 
-type TopologyRelationship =
+export type TopologyRelationship =
   | 'source_to_deployment'
   | 'deployment_to_runtime'
   | 'runtime_to_database'
   | 'deployment_to_database';
 
-const findingRelationships: Readonly<Record<string, TopologyRelationship>> = {
+export const findingRelationships: Readonly<Record<string, TopologyRelationship>> = {
   DEPLOYMENT_SHA_MISMATCH: 'source_to_deployment',
   DEPLOYMENT_SOURCE_UNVERIFIED: 'source_to_deployment',
   RUNTIME_SHA_MISMATCH: 'deployment_to_runtime',
@@ -260,6 +260,31 @@ export const buildEnvironmentTopology = (
     nodes: nodes.sort((left, right) => left.id.localeCompare(right.id)),
     edges: edges.sort((left, right) => left.id.localeCompare(right.id)),
   };
+};
+
+export const topologyNodeLabel = (node: TopologyNode): string => {
+  if (node.type === 'source') {
+    return node.provider.toLowerCase() === 'github' ? 'GitHub' : node.provider;
+  }
+  if (node.type === 'deployment') {
+    return node.provider.toLowerCase() === 'vercel' ? 'Vercel' : node.provider;
+  }
+  if (node.type === 'runtime') {
+    return 'Runtime';
+  }
+  if (node.type === 'database') {
+    return node.provider.toLowerCase() === 'supabase' ? 'Supabase' : node.provider;
+  }
+  return node.label;
+};
+
+export const topologyEdgeLabel = (edge: TopologyEdge, topology: Topology): string => {
+  const source = topology.nodes.find((node) => node.id === edge.source);
+  const target = topology.nodes.find((node) => node.id === edge.target);
+  if (source === undefined || target === undefined) {
+    return edge.id;
+  }
+  return `${topologyNodeLabel(source)} → ${topologyNodeLabel(target)}`;
 };
 
 export const mergeTopologies = (topologies: readonly Topology[]): Topology => ({

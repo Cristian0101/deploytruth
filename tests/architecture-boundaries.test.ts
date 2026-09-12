@@ -13,6 +13,7 @@ describe('architectural boundaries', () => {
       read('packages/core/src/rules.ts'),
       read('packages/core/src/report.ts'),
       read('packages/core/src/topology.ts'),
+      read('packages/core/src/comparison.ts'),
     ].join('\n');
 
     expect(source).not.toMatch(/@vercel|@supabase|apps\/web|react/i);
@@ -70,6 +71,7 @@ describe('architectural boundaries', () => {
       read('packages/core/src/rules.ts'),
       read('packages/core/src/report.ts'),
       read('packages/core/src/topology.ts'),
+      read('packages/core/src/comparison.ts'),
     ].join('\n');
 
     // Variable names in remediation text are safe; credential-shaped values are not. The token
@@ -84,6 +86,7 @@ describe('architectural boundaries', () => {
       read('packages/core/src/rules.ts'),
       read('packages/core/src/report.ts'),
       read('packages/core/src/topology.ts'),
+      read('packages/core/src/comparison.ts'),
     ].join('\n');
 
     expect(source).not.toMatch(/api\.github\.com|octokit|Authorization|Bearer/i);
@@ -138,6 +141,7 @@ describe('architectural boundaries', () => {
       read('packages/core/src/rules.ts'),
       read('packages/core/src/report.ts'),
       read('packages/core/src/topology.ts'),
+      read('packages/core/src/comparison.ts'),
     ].join('\n');
 
     expect(source).not.toMatch(/api\.supabase\.com|schema_migrations|postgresql:|Bearer/i);
@@ -151,11 +155,14 @@ describe('architectural boundaries', () => {
       read('apps/web/src/components/truth-map.tsx'),
       read('apps/web/src/components/report-view.tsx'),
       read('apps/web/src/components/inspector.tsx'),
+      read('apps/web/src/components/history-view.tsx'),
+      read('apps/web/src/components/comparison-view.tsx'),
       read('apps/web/src/lib/report-presentation.ts'),
     ].join('\n');
 
     expect(viewer).not.toContain('evaluateTruth');
     expect(viewer).not.toContain('aggregateVerdict');
+    expect(viewer).not.toContain('compareTruthReports');
   });
 
   it('keeps the local report server loopback-only and capability-limited', () => {
@@ -168,5 +175,9 @@ describe('architectural boundaries', () => {
     expect(server).toContain("url.pathname === '/api/report'");
     expect(server).toContain("url.pathname === '/api/session'");
     expect(server).toContain("url.pathname === '/api/rerun'");
+    expect(server).toContain("url.pathname === '/api/history'");
+    expect(server).toContain("url.pathname === '/api/compare'");
+    expect(server).not.toContain('unlink(');
+    expect(server).not.toMatch(/method === 'DELETE'|method === 'PUT'/);
   });
 });

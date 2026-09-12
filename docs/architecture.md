@@ -7,15 +7,15 @@ evaluates deterministic rules locally. A provider API object is never a core tru
 
 ## Package boundaries
 
-| Package                      | Owns                                                            | Must not own                              |
-| ---------------------------- | --------------------------------------------------------------- | ----------------------------------------- |
-| `@deploytruth/core`          | Domain schemas, rules, verdicts, topology, redaction primitives | Provider SDKs, filesystem I/O, CLI, React |
-| `@deploytruth/config`        | YAML parsing and manifest normalization                         | Provider calls, rule evaluation           |
-| `@deploytruth/providers`     | Read-only adapter contracts and fixture adapters                | Verdict logic, report persistence         |
-| `@deploytruth/reporter`      | Safe JSON serialization and local report files                  | Raw payload parsing, rule evaluation      |
-| `@deploytruth/cli`           | Arguments, orchestration, output, exit policy                   | Provider-specific truth logic             |
-| `@deploytruth/web`           | Rendering a supplied `TruthReport`                              | Rule evaluation or verdict aggregation    |
-| `@deploytruth/github-action` | Future CLI invocation contract                                  | A second truth engine                     |
+| Package                      | Owns                                                             | Must not own                              |
+| ---------------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
+| `@deploytruth/core`          | Domain schemas, rules, verdicts, topology, redaction, comparison | Provider SDKs, filesystem I/O, CLI, React |
+| `@deploytruth/config`        | YAML parsing and manifest normalization                          | Provider calls, rule evaluation           |
+| `@deploytruth/providers`     | Read-only adapter contracts and fixture adapters                 | Verdict logic, report persistence         |
+| `@deploytruth/reporter`      | Safe JSON serialization and local report history                 | Raw payload parsing, rule evaluation      |
+| `@deploytruth/cli`           | Arguments, orchestration, output, exit policy                    | Provider-specific truth logic             |
+| `@deploytruth/web`           | Rendering a supplied `TruthReport` / `RunComparison`             | Rule evaluation or comparison calculation |
+| `@deploytruth/github-action` | Future CLI invocation contract                                   | A second truth engine                     |
 
 The dependency direction is intentionally one-way:
 
@@ -25,8 +25,8 @@ provider APIs -> providers -> core ----------+-> reporter -> JSON files
 local Git -> providers ----------------------+-> CLI / web report viewer
 ```
 
-`core` has no UI or provider-SDK dependency. The UI receives an already-evaluated report and
-never infers node health, severity, or verdict.
+`core` has no UI or provider-SDK dependency. The UI receives an already-evaluated report or
+comparison and never infers node health, severity, verdict, or what changed.
 
 ## Normalized truth model
 
@@ -169,11 +169,14 @@ cannot create a false `PASS`.
 
 Topology is a core-domain artifact, not a React Flow artifact. Nodes contain an id, provider,
 component type, environment, label, health, and safe metadata. Edges carry expected/observed flags
-and finding codes. The web app can later map these to React Flow without changing truth logic.
+and finding codes. The web app maps these to the local Truth Map without changing truth logic.
+History comparison reuses the same topology model; it does not introduce a second graph engine.
 
-`TruthReport` is versioned (`schemaVersion: "0.1"`) and serializable. `reporter` validates it,
-runs final recursive sanitization, then writes a timestamped report and
-`.deploytruth/reports/latest.json`. No historical database is introduced in v0.1.
+`TruthReport` is versioned (`schemaVersion: "0.2"`) and serializable. Each report carries a ULID
+`runId`. `reporter` validates it, runs final recursive sanitization, then writes an
+environment-scoped historical file plus `latest.json` under `.deploytruth/reports/`. Comparison is
+a pure function over two reports (`compareTruthReports`); it never calls providers. See
+`docs/report-history.md` and ADR 008.
 
 The runtime endpoint implements the strict public-safe M5 attestation protocol:
 
@@ -206,8 +209,9 @@ The runtime endpoint implements the strict public-safe M5 attestation protocol:
 | Git portability                | M1 will use a narrow injected Git runner and stable porcelain/`rev-parse` output only.           |
 | Environment ambiguity          | The declaration has an environment map and optional explicit kind; runtime identity verifies it. |
 | Migration portability          | M4 translates provider state to migration IDs and compares sets, not database-table layouts.     |
-| CLI/UI coupling                | CLI emits reports; UI renders reports. Neither owns rule implementation.                         |
-| Overengineering                | Four runtime packages plus one viewer; no plugin registry, accounts, database, or SDKs in M0.    |
+| CLI/UI coupling                | CLI emits reports; UI renders reports and comparisons. Neither owns rule implementation.         |
+| History path traversal         | Project/environment names are sanitized keys; run IDs resolve only through the report store.     |
+| Overengineering                | Filesystem history, no plugin registry, accounts, hosted dashboard, or extra providers in M7.    |
 
 ## Milestone sequence
 
@@ -224,5 +228,6 @@ ADR 005). M4 (current) adds Supabase database and migration truth through
 read-only PostgreSQL reader, and identity-gated comparison (`docs/supabase-truth.md`, ADR 006).
 M5 adds fresh runtime identity, presence-only environment evidence, URL-derived Supabase target
 identity, a harmless live connection probe, and distinct deployment-to-runtime and
-runtime-to-database topology edges (`docs/runtime-truth.md`, ADR 007). Later work can build the
-visual truth map from these core-owned edges. Every adapter milestone starts with fixtures.
+runtime-to-database topology edges (`docs/runtime-truth.md`, ADR 007). M6 renders that topology
+locally. M7 stores each completed report locally and compares runs semantically
+(`docs/report-history.md`, ADR 008). Every adapter milestone starts with fixtures.

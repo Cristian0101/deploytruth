@@ -155,8 +155,17 @@ connection never fabricates an observed database identity.
 ## Local UI and storage
 
 The Vite development server is explicitly bound to `127.0.0.1`. Local reports are written only to
-the invoking project’s `.deploytruth/reports/` directory. Default report files are ignored by Git.
-Telemetry is not implemented and must remain opt-in if it is ever proposed.
+the invoking project’s `.deploytruth/reports/` directory, namespaced by sanitized project and
+environment keys. Default report files are ignored by Git. Telemetry is not implemented and must
+remain opt-in if it is ever proposed.
+
+History stores only serialized, redacted `TruthReport` JSON. Run IDs are ULIDs resolved through
+the report store; they never map to arbitrary filesystem paths. `../`, absolute paths, NUL, and
+separator abuse in project or environment names are rejected. Comparison output contains only
+fields already safe in `TruthReport` and cannot recover redacted values. The local server exposes
+read-only history and comparison endpoints; there is no deletion, mutation, or shell endpoint for
+history. Static `--report` mode does not search nearby directories for history. See
+`docs/report-history.md`.
 
 ## Adapter review checklist
 

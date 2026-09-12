@@ -5,6 +5,7 @@ adopt semantic versioning when the package is ready for publication.
 
 ## Unreleased
 
+- M7 local report history and semantic run comparison (`history`, `diff`, History UI).
 - Establish the public open-source repository and controlled live acceptance environment.
 
 ## 0.1.0
