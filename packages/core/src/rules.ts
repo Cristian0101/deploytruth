@@ -36,7 +36,10 @@ const isCheckApplicable = (environment: DeclaredEnvironment, check: CheckName): 
     case 'remote_source':
       return Boolean(environment.source);
     case 'deployment_sha':
-      return Boolean(environment.source && environment.deployment);
+      // Applicable whenever a deployment is declared. Its coverage still requires both an
+      // authoritative source SHA and a deployment SHA, so a declared deployment without a
+      // source can never produce a false PASS — it reports a coverage gap instead.
+      return Boolean(environment.deployment);
     case 'migrations':
       return Boolean(environment.database?.migrationDirectory);
     case 'runtime_identity':
@@ -70,13 +73,16 @@ const checkEnabled = (environment: DeclaredEnvironment, check?: CheckName): bool
   !check || activeChecks(environment).includes(check);
 
 /**
- * The best available source SHA: remote-authoritative evidence first (ADR 003/004), then the
- * legacy merged field, then local HEAD.
+ * The best available source SHA. When a remote-authoritative observation exists (ADR 004), only
+ * its `remoteHeadSha` counts — an `unavailable` remoteSource must not silently fall back to local
+ * evidence, because the declared source is the remote branch, not the local checkout. The local
+ * fallbacks (legacy merged field, then HEAD) apply only when no remote observation was produced
+ * at all, preserving M0-era fixture semantics (ADR 003).
  */
 const sourceSha = (observation?: EnvironmentObservation): string | undefined =>
-  observation?.remoteSource?.remoteHeadSha ??
-  observation?.source?.remoteHeadSha ??
-  observation?.source?.headSha;
+  observation?.remoteSource !== undefined
+    ? observation.remoteSource.remoteHeadSha
+    : (observation?.source?.remoteHeadSha ?? observation?.source?.headSha);
 
 const databaseConnection = (observation?: EnvironmentObservation) =>
   observation?.deployment?.connectedResources.find((connection) => connection.type === 'database');
@@ -548,18 +554,271 @@ export const deploymentShaMismatchRule: TruthRule = {
         code: 'DEPLOYMENT_SHA_MISMATCH',
         title: 'Deployment SHA does not match source SHA',
         description:
-          'The deployment provider reports a commit different from the configured source branch.',
+          'The active production deployment was built from a different source commit than the declared source branch. An intentional rollback still produces this finding; the declaration describes the expected source.',
         severity: 'HIGH',
         status: 'FAIL',
         expected,
         observed,
-        evidence: { sourceSha: expected, deploymentSha: observed },
+        evidence: {
+          sourceSha: expected,
+          deploymentSha: observed,
+          ...(observation?.deployment?.deploymentId !== undefined
+            ? { deploymentId: observation.deployment.deploymentId }
+            : {}),
+          ...(observation?.deployment?.state !== undefined
+            ? { deploymentState: observation.deployment.state }
+            : {}),
+        },
         affectedComponents: [
           component('source', environment.id),
           component('deployment', environment.id),
         ],
         remediation:
-          'Confirm the target branch and redeploy the expected commit, or update the declared branch.',
+          'Confirm the target branch and redeploy the expected commit, or update the declared branch if the rollback is intentional.',
+      }),
+    ];
+  },
+};
+
+/**
+ * True when deployment evidence exists and the control plane was actually observed — either
+ * explicitly `available`, or a pre-M3 legacy observation with no availability record.
+ */
+const deploymentObserved = (observation?: EnvironmentObservation): boolean =>
+  observation?.deployment !== undefined &&
+  observation.deployment.availability?.state !== 'unavailable';
+
+export const deploymentSourceUnverifiedRule: TruthRule = {
+  code: 'DEPLOYMENT_SOURCE_UNVERIFIED',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const deployment = observation?.deployment;
+    if (!deploymentObserved(observation) || deployment?.commitSha !== undefined) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DEPLOYMENT_SOURCE_UNVERIFIED',
+        title: 'Deployment source commit could not be verified',
+        description:
+          'The deployment provider did not report a trustworthy source commit for the active production deployment, so deployment SHA truth cannot be established.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'deployment source commit SHA observable',
+        observed: 'source metadata unavailable',
+        evidence: {
+          deploymentId: deployment?.deploymentId ?? 'unknown',
+          provider: deployment?.provider ?? 'unknown',
+        },
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Confirm the production deployment was created from a connected Git repository so its source commit is recorded by the provider.',
+      }),
+    ];
+  },
+};
+
+const isVercelDeployment = (observation?: EnvironmentObservation): boolean =>
+  observation?.deployment?.provider === 'vercel';
+
+const vercelUnavailableEvidence = (
+  deployment: NonNullable<EnvironmentObservation['deployment']>,
+): Record<string, string | number> => ({
+  project: deployment.project ?? 'unknown',
+  reason: deployment.availability?.reason ?? 'unknown',
+  ...(deployment.availability?.detail ? { detail: deployment.availability.detail } : {}),
+  ...(deployment.availability?.rateLimit?.resetAt
+    ? { rateLimitResetAt: deployment.availability.rateLimit.resetAt }
+    : {}),
+  ...(deployment.availability?.rateLimit?.remaining !== undefined
+    ? { rateLimitRemaining: deployment.availability.rateLimit.remaining }
+    : {}),
+  ...(deployment.availability?.rateLimit?.retryAfter !== undefined
+    ? { retryAfterSeconds: deployment.availability.rateLimit.retryAfter }
+    : {}),
+});
+
+export const vercelProjectUnavailableRule: TruthRule = {
+  code: 'VERCEL_PROJECT_UNAVAILABLE',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const deployment = observation?.deployment;
+    if (
+      !isVercelDeployment(observation) ||
+      deployment?.availability?.state !== 'unavailable' ||
+      deployment.availability.target === 'deployment'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'VERCEL_PROJECT_UNAVAILABLE',
+        title: 'Vercel project could not be observed',
+        description:
+          'Vercel did not return project metadata; the project may be renamed, the scope may be wrong, credentials may be missing or insufficient, or the API may be unavailable.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'project observable',
+        observed: deployment.availability.reason ?? 'unavailable',
+        evidence: vercelUnavailableEvidence(deployment),
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Verify the declared project and optional scope, configure DEPLOYTRUTH_VERCEL_TOKEN or VERCEL_TOKEN, and retry after any rate-limit reset.',
+      }),
+    ];
+  },
+};
+
+export const vercelProductionDeploymentUnavailableRule: TruthRule = {
+  code: 'VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const deployment = observation?.deployment;
+    if (
+      !isVercelDeployment(observation) ||
+      deployment?.availability?.state !== 'unavailable' ||
+      deployment.availability.target !== 'deployment'
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'VERCEL_PRODUCTION_DEPLOYMENT_UNAVAILABLE',
+        title: 'Current Vercel production deployment could not be determined',
+        description:
+          'The project was observed, but Vercel control-plane evidence did not identify which deployment is currently serving production (for example, no production domain is assigned to a deployment).',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'current production deployment identifiable',
+        observed: deployment.availability.reason ?? 'unavailable',
+        evidence: vercelUnavailableEvidence(deployment),
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Confirm the project has a production domain assigned to a deployment, then retry the observation.',
+      }),
+    ];
+  },
+};
+
+export const deploymentNotReadyRule: TruthRule = {
+  code: 'DEPLOYMENT_NOT_READY',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const state = observation?.deployment?.state;
+    if (
+      !deploymentObserved(observation) ||
+      state === undefined ||
+      !['building', 'queued', 'unknown'].includes(state)
+    ) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DEPLOYMENT_NOT_READY',
+        title: 'Production deployment is not in a ready state',
+        description:
+          'The deployment currently assigned to production is still building, queued, or in a state the provider did not clearly report as ready.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: 'ready',
+        observed: state,
+        evidence: {
+          deploymentId: observation?.deployment?.deploymentId ?? 'unknown',
+          state,
+        },
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Wait for the deployment to finish or investigate why the production deployment has not reached a ready state.',
+      }),
+    ];
+  },
+};
+
+export const deploymentFailedRule: TruthRule = {
+  code: 'DEPLOYMENT_FAILED',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const state = observation?.deployment?.state;
+    if (!deploymentObserved(observation) || !['error', 'canceled'].includes(state ?? '')) {
+      return [];
+    }
+
+    return [
+      finding({
+        code: 'DEPLOYMENT_FAILED',
+        title: 'Production deployment is in a failed state',
+        description:
+          'The deployment currently assigned to production reports an error or canceled state; production may not be serving the expected build.',
+        severity: 'HIGH',
+        status: 'FAIL',
+        expected: 'ready',
+        observed: state,
+        evidence: {
+          deploymentId: observation?.deployment?.deploymentId ?? 'unknown',
+          state: state ?? 'unknown',
+        },
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Investigate the failed production deployment and promote a healthy build through the provider console.',
+      }),
+    ];
+  },
+};
+
+export const stableDomainStaleRule: TruthRule = {
+  code: 'STABLE_DOMAIN_STALE',
+  check: 'deployment_sha',
+  evaluate: ({ environment, observation }) => {
+    const declaredDomain = environment.deployment?.domain;
+    const deployment = observation?.deployment;
+    if (declaredDomain === undefined || !deploymentObserved(observation)) {
+      return [];
+    }
+    const verified = deployment?.stableDomainVerified;
+    if (verified === true) {
+      return [];
+    }
+
+    if (verified === false) {
+      return [
+        finding({
+          code: 'STABLE_DOMAIN_STALE',
+          title: 'Declared stable domain does not resolve to the production deployment',
+          description:
+            'Provider control-plane evidence shows the declared stable domain is not assigned to the deployment currently serving production.',
+          severity: 'HIGH',
+          status: 'FAIL',
+          expected: `${declaredDomain} -> ${deployment?.deploymentId ?? 'current production deployment'}`,
+          observed: 'domain resolves elsewhere or is not assigned',
+          evidence: {
+            domain: declaredDomain,
+            deploymentId: deployment?.deploymentId ?? 'unknown',
+          },
+          affectedComponents: [component('deployment', environment.id)],
+          remediation:
+            'Verify the domain assignment in the deployment provider console so the stable domain serves the current production deployment.',
+        }),
+      ];
+    }
+
+    return [
+      finding({
+        code: 'STABLE_DOMAIN_STALE',
+        title: 'Declared stable domain could not be verified',
+        description:
+          'The declared stable domain is configured, but provider evidence could not confirm it resolves to the current production deployment.',
+        severity: 'WARNING',
+        status: 'WARN',
+        expected: `${declaredDomain} verifiable`,
+        observed: 'verification inconclusive',
+        evidence: { domain: declaredDomain },
+        affectedComponents: [component('deployment', environment.id)],
+        remediation:
+          'Confirm the domain is assigned to this project and points at the current production deployment.',
       }),
     ];
   },
@@ -736,7 +995,10 @@ export const environmentVariableMissingRule: TruthRule = {
   code: 'ENVIRONMENT_VARIABLE_MISSING',
   check: 'environment_variables',
   evaluate: ({ environment, observation }) => {
-    if (environment.requiredEnvironmentVariables.length === 0 || !observation?.deployment) {
+    if (
+      environment.requiredEnvironmentVariables.length === 0 ||
+      observation?.deployment?.environmentVariables === undefined
+    ) {
       return [];
     }
 
@@ -846,6 +1108,12 @@ export const defaultRules: readonly TruthRule[] = [
   githubRepositoryUnavailableRule,
   githubBranchUnavailableRule,
   deploymentShaMismatchRule,
+  deploymentSourceUnverifiedRule,
+  vercelProjectUnavailableRule,
+  vercelProductionDeploymentUnavailableRule,
+  deploymentNotReadyRule,
+  deploymentFailedRule,
+  stableDomainStaleRule,
   wrongDatabaseProjectRule,
   previewUsesProductionDatabaseRule,
   databaseMigrationsBehindRule,
