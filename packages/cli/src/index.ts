@@ -9,15 +9,18 @@ import {
   loadDeployTruthManifest,
   supportedManifestProviders,
 } from '@deploytruth/config';
-import { redactText, type SourceObservation } from '@deploytruth/core';
+import { redactText, type DeploymentObservation, type SourceObservation } from '@deploytruth/core';
 import {
   createGitHubProvider,
+  createVercelProvider,
   localGitProvider,
   resolveGitHubCredential,
+  resolveVercelCredential,
   type GitHubSourceConfig,
   type LocalGitConfig,
   type ProviderDiagnostic,
   type TruthProvider,
+  type VercelDeploymentConfig,
 } from '@deploytruth/providers';
 import { serializeTruthReport, writeReportFile } from '@deploytruth/reporter';
 import { Command } from 'commander';
@@ -63,6 +66,7 @@ export interface CliDependencies {
   /** Injectable providers for tests; production uses the real adapters. */
   readonly gitProvider?: TruthProvider<LocalGitConfig, SourceObservation>;
   readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
+  readonly vercelProvider?: TruthProvider<VercelDeploymentConfig, DeploymentObservation>;
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -103,6 +107,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
         const environmentIds = Object.keys(manifest.environments).sort();
         const gitProvider = dependencies.gitProvider ?? localGitProvider;
         const githubProvider = dependencies.githubProvider ?? createGitHubProvider({ env });
+        const vercelProvider = dependencies.vercelProvider ?? createVercelProvider({ env });
 
         const gitDiagnostics = await Promise.all(
           environmentIds
@@ -169,8 +174,53 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }),
         );
 
-        const hasError = [...gitDiagnostics, ...githubDiagnostics].some(({ diagnostics }) =>
-          diagnostics.some((entry) => entry.status === 'error'),
+        const vercelCredential = resolveVercelCredential(env);
+        const vercelDiagnostics = await Promise.all(
+          environmentIds
+            .filter((id) => manifest.environments[id]?.deployment?.provider === 'vercel')
+            .map(async (id) => {
+              const declared = manifest.environments[id]?.deployment;
+              const diagnostics: ProviderDiagnostic[] = [
+                {
+                  code: 'VERCEL_CREDENTIALS',
+                  title: 'Vercel credentials',
+                  status: vercelCredential === undefined ? 'warning' : 'ok',
+                  message:
+                    vercelCredential === undefined
+                      ? 'none — set DEPLOYTRUTH_VERCEL_TOKEN or VERCEL_TOKEN to observe deployment truth'
+                      : `available (${vercelCredential.variable})`,
+                },
+              ];
+              if (declared === undefined) {
+                return { environment: id, diagnostics };
+              }
+              try {
+                const config = vercelProvider.validateConfig({
+                  project: declared.project,
+                  ...(declared.target !== undefined ? { target: declared.target } : {}),
+                  ...(declared.scope !== undefined ? { scope: declared.scope } : {}),
+                  ...(declared.domain !== undefined ? { domain: declared.domain } : {}),
+                });
+                const results = await vercelProvider.diagnose?.({
+                  project: manifest.project,
+                  environment: id,
+                  config,
+                });
+                diagnostics.push(...(results ?? []));
+              } catch (error) {
+                diagnostics.push({
+                  code: 'VERCEL_CONFIG',
+                  title: 'Vercel configuration',
+                  status: 'error',
+                  message: safeErrorMessage(error),
+                });
+              }
+              return { environment: id, diagnostics };
+            }),
+        );
+
+        const hasError = [...gitDiagnostics, ...githubDiagnostics, ...vercelDiagnostics].some(
+          ({ diagnostics }) => diagnostics.some((entry) => entry.status === 'error'),
         );
         const result = {
           status: hasError ? 'DEGRADED' : 'VALID',
@@ -184,7 +234,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             github: githubDiagnostics.flatMap(({ environment, diagnostics }) =>
               diagnostics.map((entry) => ({ environment, ...entry })),
             ),
-            deployment: 'NOT_IMPLEMENTED',
+            vercel: vercelDiagnostics.flatMap(({ environment, diagnostics }) =>
+              diagnostics.map((entry) => ({ environment, ...entry })),
+            ),
             database: 'NOT_IMPLEMENTED',
             runtime: 'NOT_IMPLEMENTED',
           },
@@ -198,7 +250,11 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
           );
           console.log(`Environments: ${result.environments.join(', ')}`);
           console.log(`Declared provider families: ${result.supportedProviders.join(', ')}`);
-          for (const { environment, diagnostics } of [...gitDiagnostics, ...githubDiagnostics]) {
+          for (const { environment, diagnostics } of [
+            ...gitDiagnostics,
+            ...githubDiagnostics,
+            ...vercelDiagnostics,
+          ]) {
             for (const entry of diagnostics) {
               const marker =
                 entry.status === 'ok' ? 'ok' : entry.status === 'warning' ? 'warn' : 'ERROR';
@@ -206,7 +262,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             }
           }
           console.log(
-            'Local Git and GitHub source observation are active. Deployment, database, and runtime providers are not implemented yet.',
+            'Local Git, GitHub source, and Vercel deployment observation are active. Database and runtime providers are not implemented yet.',
           );
         }
         if (hasError) {
@@ -239,6 +295,9 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
             : {}),
           ...(dependencies.githubProvider !== undefined
             ? { githubProvider: dependencies.githubProvider }
+            : {}),
+          ...(dependencies.vercelProvider !== undefined
+            ? { vercelProvider: dependencies.vercelProvider }
             : {}),
           env,
         });

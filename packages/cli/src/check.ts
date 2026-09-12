@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import {
   evaluateTruth,
   redactText,
+  type DeploymentObservation,
   type EnvironmentTruth,
   type ProjectDeclaration,
   type SourceObservation,
@@ -12,10 +13,12 @@ import { ConfigError, loadDeployTruthManifest } from '@deploytruth/config';
 import {
   GitError,
   createGitHubProvider,
+  createVercelProvider,
   localGitProvider,
   type GitHubSourceConfig,
   type TruthProvider,
   type LocalGitConfig,
+  type VercelDeploymentConfig,
 } from '@deploytruth/providers';
 
 export interface CheckOptions {
@@ -26,6 +29,8 @@ export interface CheckOptions {
   readonly gitProvider?: TruthProvider<LocalGitConfig, SourceObservation>;
   /** Injectable for tests; defaults to a GitHub adapter over the live GET-only transport. */
   readonly githubProvider?: TruthProvider<GitHubSourceConfig, SourceObservation>;
+  /** Injectable for tests; defaults to a Vercel adapter over the live GET-only transport. */
+  readonly vercelProvider?: TruthProvider<VercelDeploymentConfig, DeploymentObservation>;
   /** Environment for credential resolution; defaults to process.env. */
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
@@ -122,11 +127,54 @@ const observeGitHub = async (
   }
 };
 
+const observeVercel = async (
+  provider: TruthProvider<VercelDeploymentConfig, DeploymentObservation>,
+  context: {
+    project: string;
+    environment: string;
+    deployment: {
+      project: string;
+      target?: 'production';
+      scope?: string;
+      domain?: string;
+    };
+    signal?: AbortSignal;
+  },
+): Promise<{ observation?: DeploymentObservation; diagnostic?: string }> => {
+  let config: VercelDeploymentConfig;
+  try {
+    config = provider.validateConfig({
+      project: context.deployment.project,
+      ...(context.deployment.target !== undefined ? { target: context.deployment.target } : {}),
+      ...(context.deployment.scope !== undefined ? { scope: context.deployment.scope } : {}),
+      ...(context.deployment.domain !== undefined ? { domain: context.deployment.domain } : {}),
+    });
+  } catch {
+    return {
+      diagnostic:
+        'Invalid Vercel deployment declaration; expected a project name/id, target "production", and an optional scope or bare-hostname domain.',
+    };
+  }
+
+  try {
+    const observation = await provider.observe({
+      project: context.project,
+      environment: context.environment,
+      config,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return { observation };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown Vercel observation failure';
+    return { diagnostic: redactText(message) };
+  }
+};
+
 /**
- * Loads the manifest, observes local Git truth and — when the declared source provider is
- * GitHub — remote-authoritative GitHub truth for the selected environment, then evaluates the
- * deterministic rule set. Missing provider evidence remains an explicit UNKNOWN/WARN signal; it
- * never produces a false PASS.
+ * Loads the manifest, observes local Git truth, remote-authoritative source truth (GitHub when
+ * declared), and deployment truth (Vercel when declared) for the selected environment, then
+ * evaluates the deterministic rule set. Missing provider evidence remains an explicit
+ * UNKNOWN/WARN signal; it never produces a false PASS.
  */
 export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckExecution> => {
   const manifest = await loadDeployTruthManifest(options.configPath);
@@ -136,50 +184,83 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
 
   let source: SourceObservation | undefined;
   let remoteSource: SourceObservation | undefined;
-  if (environment?.source !== undefined) {
-    const observations: Promise<{ observation?: SourceObservation; diagnostic?: string }>[] = [
-      observeLocalGit(options.gitProvider ?? localGitProvider, {
+  let deployment: DeploymentObservation | undefined;
+
+  const pending: Promise<void>[] = [];
+
+  if (environment?.deployment !== undefined && environment.deployment.provider === 'vercel') {
+    const declared = environment.deployment;
+    const vercelProvider =
+      options.vercelProvider ??
+      createVercelProvider({
+        ...(options.env !== undefined ? { env: options.env } : {}),
+      });
+    pending.push(
+      observeVercel(vercelProvider, {
         project: manifest.project,
         environment: environmentId,
-        directory: dirname(options.configPath),
+        deployment: {
+          project: declared.project,
+          ...(declared.target !== undefined ? { target: declared.target } : {}),
+          ...(declared.scope !== undefined ? { scope: declared.scope } : {}),
+          ...(declared.domain !== undefined ? { domain: declared.domain } : {}),
+        },
+      }).then((result) => {
+        deployment = result.observation;
+        if (result.diagnostic !== undefined) {
+          diagnostics.push(`vercel: ${result.diagnostic}`);
+        }
       }),
-    ];
-
-    const declared = environment.source;
-    const githubRequested = declared.provider === 'github';
-    if (githubRequested) {
-      const githubProvider =
-        options.githubProvider ??
-        createGitHubProvider({
-          ...(options.env !== undefined ? { env: options.env } : {}),
-        });
-      observations.push(
-        declared.repository !== undefined && declared.branch !== undefined
-          ? observeGitHub(githubProvider, {
-              project: manifest.project,
-              environment: environmentId,
-              repository: declared.repository,
-              branch: declared.branch,
-            })
-          : Promise.resolve({
-              diagnostic:
-                'GitHub source declarations require both repository (owner/repo) and branch.',
-            }),
-      );
-    }
-
-    const [localResult, remoteResult] = await Promise.all(observations);
-    source = localResult?.observation;
-    if (localResult?.diagnostic !== undefined) {
-      diagnostics.push(`local-git: ${localResult.diagnostic}`);
-    }
-    if (remoteResult !== undefined) {
-      remoteSource = remoteResult.observation;
-      if (remoteResult.diagnostic !== undefined) {
-        diagnostics.push(`github: ${remoteResult.diagnostic}`);
-      }
-    }
+    );
   }
+
+  if (environment?.source !== undefined) {
+    const declared = environment.source;
+    pending.push(
+      Promise.all([
+        observeLocalGit(options.gitProvider ?? localGitProvider, {
+          project: manifest.project,
+          environment: environmentId,
+          directory: dirname(options.configPath),
+        }),
+        declared.provider === 'github'
+          ? declared.repository !== undefined && declared.branch !== undefined
+            ? observeGitHub(
+                options.githubProvider ??
+                  createGitHubProvider({
+                    ...(options.env !== undefined ? { env: options.env } : {}),
+                  }),
+                {
+                  project: manifest.project,
+                  environment: environmentId,
+                  repository: declared.repository,
+                  branch: declared.branch,
+                },
+              )
+            : Promise.resolve<{
+                observation?: SourceObservation;
+                diagnostic?: string;
+              }>({
+                diagnostic:
+                  'GitHub source declarations require both repository (owner/repo) and branch.',
+              })
+          : Promise.resolve<{ observation?: SourceObservation; diagnostic?: string }>({}),
+      ]).then(([localResult, remoteResult]) => {
+        source = localResult?.observation;
+        if (localResult?.diagnostic !== undefined) {
+          diagnostics.push(`local-git: ${localResult.diagnostic}`);
+        }
+        if (remoteResult !== undefined) {
+          remoteSource = remoteResult.observation;
+          if (remoteResult.diagnostic !== undefined) {
+            diagnostics.push(`github: ${remoteResult.diagnostic}`);
+          }
+        }
+      }),
+    );
+  }
+
+  await Promise.all(pending);
 
   const report = evaluateTruth(
     {
@@ -191,6 +272,7 @@ export const runEnvironmentCheck = async (options: CheckOptions): Promise<CheckE
             environment: environmentId,
             ...(source !== undefined ? { source } : {}),
             ...(remoteSource !== undefined ? { remoteSource } : {}),
+            ...(deployment !== undefined ? { deployment } : {}),
           },
         },
       },
@@ -348,6 +430,98 @@ const formatSourceTruthSummary = (truth: EnvironmentTruth): readonly string[] =>
     : [];
 };
 
+const formatVercelSection = (
+  truth: EnvironmentTruth,
+  diagnostics: readonly string[],
+): readonly string[] => {
+  const deployment = truth.observation?.deployment;
+  const lines = ['  Vercel'];
+
+  if (deployment === undefined) {
+    const reason =
+      diagnostics
+        .find((entry) => entry.startsWith('vercel:'))
+        ?.slice('vercel:'.length)
+        .trim() ?? 'no Vercel observation available';
+    lines.push(subRow('Status', `NOT OBSERVED — ${reason}`));
+    return lines;
+  }
+
+  lines.push(subRow('Project', deployment.project ?? 'unknown'));
+
+  if (deployment.availability?.state === 'unavailable') {
+    const availability = deployment.availability;
+    lines.push(
+      subRow(
+        'Status',
+        `UNAVAILABLE — ${availability.detail ?? availability.reason ?? 'deployment truth unavailable'}`,
+      ),
+    );
+    if (availability.rateLimit?.resetAt !== undefined) {
+      lines.push(subRow('Retry after', availability.rateLimit.resetAt));
+    } else if (availability.rateLimit?.retryAfter !== undefined) {
+      lines.push(subRow('Retry after', `${availability.rateLimit.retryAfter}s`));
+    }
+    return lines;
+  }
+
+  lines.push(subRow('Target', deployment.target ?? 'unknown'));
+  lines.push(subRow('Deployment', deployment.deploymentId ?? 'unknown'));
+  lines.push(subRow('State', (deployment.state ?? 'unknown').toUpperCase()));
+  if (deployment.sourceBranch !== undefined) {
+    lines.push(subRow('Source branch', deployment.sourceBranch));
+  }
+  lines.push(subRow('Source SHA', shortSha(deployment.commitSha)));
+  if (deployment.sourceRepository !== undefined) {
+    lines.push(subRow('Source repo', deployment.sourceRepository));
+  }
+  if (deployment.deploymentUrl !== undefined) {
+    lines.push(subRow('URL', deployment.deploymentUrl));
+  }
+  if (deployment.stableDomain !== undefined) {
+    lines.push(
+      subRow(
+        'Domain',
+        `${deployment.stableDomain}${
+          deployment.stableDomainVerified === true
+            ? ' (verified)'
+            : deployment.stableDomainVerified === false
+              ? ' (STALE — not serving production)'
+              : ' (unverified)'
+        }`,
+      ),
+    );
+  }
+  if (deployment.createdAt !== undefined) {
+    lines.push(subRow('Created', deployment.createdAt));
+  }
+  return lines;
+};
+
+/**
+ * Deployment truth is VERIFIED only when the observed production deployment is ready, its
+ * recorded source commit matches the authoritative source SHA, and any declared stable domain
+ * is confirmed to resolve to it.
+ */
+const formatDeploymentTruthSummary = (truth: EnvironmentTruth): readonly string[] => {
+  const deployment = truth.observation?.deployment;
+  const remote = truth.observation?.remoteSource;
+  const expectedSha =
+    remote !== undefined
+      ? remote.remoteHeadSha
+      : (truth.observation?.source?.remoteHeadSha ?? truth.observation?.source?.headSha);
+  const verified =
+    deployment?.availability?.state === 'available' &&
+    deployment.state === 'ready' &&
+    deployment.commitSha !== undefined &&
+    expectedSha !== undefined &&
+    deployment.commitSha === expectedSha &&
+    (deployment.stableDomain === undefined || deployment.stableDomainVerified === true);
+  return verified
+    ? [row('Deployment truth', `VERIFIED — production serves ${shortSha(deployment?.commitSha)}`)]
+    : [];
+};
+
 const notCheckedSection = (title: string, provider: string): readonly string[] => [
   title,
   row(provider, 'NOT CHECKED (adapter not implemented)'),
@@ -376,7 +550,16 @@ export const formatCheckReport = (execution: CheckExecution): string => {
     lines.push(...formatSourceTruthSummary(truth), '');
   }
   if (environment.deployment !== undefined) {
-    lines.push(...notCheckedSection('DEPLOYMENT', environment.deployment.provider), '');
+    if (environment.deployment.provider === 'vercel') {
+      lines.push(
+        'DEPLOYMENT',
+        ...formatVercelSection(truth, execution.diagnostics),
+        ...formatDeploymentTruthSummary(truth),
+        '',
+      );
+    } else {
+      lines.push(...notCheckedSection('DEPLOYMENT', environment.deployment.provider), '');
+    }
   }
   if (environment.database !== undefined) {
     lines.push(...notCheckedSection('DATABASE', environment.database.provider), '');
