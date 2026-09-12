@@ -31,6 +31,32 @@ const findingsFor = (
     ),
   );
 
+type TopologyRelationship =
+  | 'source_to_deployment'
+  | 'deployment_to_runtime'
+  | 'runtime_to_database'
+  | 'deployment_to_database';
+
+const findingRelationships: Readonly<Record<string, TopologyRelationship>> = {
+  DEPLOYMENT_SHA_MISMATCH: 'source_to_deployment',
+  DEPLOYMENT_SOURCE_UNVERIFIED: 'source_to_deployment',
+  RUNTIME_SHA_MISMATCH: 'deployment_to_runtime',
+  RUNTIME_ATTESTATION_UNAVAILABLE: 'deployment_to_runtime',
+  RUNTIME_ATTESTATION_FRESHNESS_UNVERIFIED: 'deployment_to_runtime',
+  RUNTIME_ENVIRONMENT_MISMATCH: 'deployment_to_runtime',
+  RUNTIME_DATABASE_PROJECT_MISMATCH: 'runtime_to_database',
+  RUNTIME_DATABASE_IDENTITY_UNVERIFIED: 'runtime_to_database',
+  RUNTIME_DATABASE_CONNECTION_UNAVAILABLE: 'runtime_to_database',
+  WRONG_DATABASE_PROJECT: 'deployment_to_database',
+  PREVIEW_USES_PRODUCTION_DATABASE: 'deployment_to_database',
+};
+
+const findingsForRelationship = (
+  findings: readonly TruthFinding[],
+  relationship: TopologyRelationship,
+): readonly TruthFinding[] =>
+  findings.filter((finding) => findingRelationships[finding.code] === relationship);
+
 const node = (
   id: string,
   provider: string,
@@ -172,10 +198,13 @@ export const buildEnvironmentTopology = (
 
   if (environment.source && environment.deployment) {
     edges.push(
-      edge(source, deployment, true, Boolean(observation?.deployment), [
-        ...findingsFor(findings, environment.id, 'source'),
-        ...findingsFor(findings, environment.id, 'deployment'),
-      ]),
+      edge(
+        source,
+        deployment,
+        true,
+        Boolean(observation?.deployment),
+        findingsForRelationship(findings, 'source_to_deployment'),
+      ),
     );
   }
 
@@ -184,10 +213,13 @@ export const buildEnvironmentTopology = (
       (resource) => resource.type === 'database',
     );
     edges.push(
-      edge(deployment, database, true, connection?.identifier === environment.database.projectRef, [
-        ...findingsFor(findings, environment.id, 'deployment'),
-        ...findingsFor(findings, environment.id, 'database'),
-      ]),
+      edge(
+        deployment,
+        database,
+        true,
+        connection?.identifier === environment.database.projectRef,
+        findingsForRelationship(findings, 'deployment_to_database'),
+      ),
     );
   }
 
@@ -203,10 +235,7 @@ export const buildEnvironmentTopology = (
           deploymentSha !== undefined &&
           runtimeSha !== undefined &&
           deploymentSha === runtimeSha,
-        [
-          ...findingsFor(findings, environment.id, 'deployment'),
-          ...findingsFor(findings, environment.id, 'runtime'),
-        ],
+        findingsForRelationship(findings, 'deployment_to_runtime'),
       ),
     );
   }
@@ -222,10 +251,7 @@ export const buildEnvironmentTopology = (
           runtimeConnection?.identity === 'verified' &&
           runtimeConnection.targetProjectRef === environment.database.projectRef &&
           runtimeConnection.status === 'connected',
-        [
-          ...findingsFor(findings, environment.id, 'runtime'),
-          ...findingsFor(findings, environment.id, 'database'),
-        ],
+        findingsForRelationship(findings, 'runtime_to_database'),
       ),
     );
   }
