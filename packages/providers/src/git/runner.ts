@@ -68,6 +68,26 @@ const allFlags = (allowed: readonly string[]): ArgumentPredicate => {
 const isPlainWord = (value: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value);
 
 /**
+ * `ls-tree` revisions are limited to `HEAD`, `@`, or a hex object id — the migration catalog
+ * always reads the immutable committed tree, never refs or ranges derived from input.
+ */
+const isTreeRevision = (value: string): boolean => /^(HEAD|@|[0-9a-f]{4,64})$/.test(value);
+
+/**
+ * A repository-relative tree path: safe-character segments, optional trailing slash for
+ * "list the directory's contents", and never a `.`/`..` segment or a doubled separator.
+ */
+const isTreePath = (value: string): boolean => {
+  const trimmed = value.endsWith('/') ? value.slice(0, -1) : value;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(trimmed)) {
+    return false;
+  }
+  return !trimmed
+    .split('/')
+    .some((segment) => segment === '' || segment === '..' || segment === '.');
+};
+
+/**
  * Read-only allowlist for the subcommands the adapter uses. Anything else — including
  * git-level flags such as `-c`, `--git-dir`, or mutating subcommands — is rejected before
  * a process is ever spawned.
@@ -100,6 +120,12 @@ const READONLY_COMMANDS: Readonly<Record<string, ArgumentPredicate>> = {
     args.length >= 2 &&
     args[1] === 'list' &&
     args.slice(2).every((arg) => arg === '--porcelain' || arg === '-z'),
+  /**
+   * `ls-tree <rev> <path>` — the single form the migration catalog uses. No recursive
+   * descent, no `--name-only`/`--format` variants, no arbitrary revisions or paths.
+   */
+  'ls-tree': (args) =>
+    args.length === 3 && isTreeRevision(args[1] ?? '') && isTreePath(args[2] ?? ''),
 };
 
 export const assertReadOnlyGitInvocation = (args: readonly string[]): void => {

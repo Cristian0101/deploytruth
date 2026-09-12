@@ -1,12 +1,17 @@
 import type {
   DatabaseObservation,
   DeploymentObservation,
+  MigrationCatalogObservation,
   RuntimeObservation,
   SourceObservation,
 } from '@deploytruth/core';
 
 export type ProviderObservation =
-  SourceObservation | DeploymentObservation | DatabaseObservation | RuntimeObservation;
+  | SourceObservation
+  | DeploymentObservation
+  | DatabaseObservation
+  | MigrationCatalogObservation
+  | RuntimeObservation;
 
 export type ProviderCapability =
   | 'source'
