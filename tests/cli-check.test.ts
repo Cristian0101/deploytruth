@@ -1,7 +1,11 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 
-import { parseTruthReport, serializeTruthReport } from '@deploytruth/reporter';
+import {
+  parseTruthReport,
+  serializeTruthReport,
+  createReportHistoryStore,
+} from '@deploytruth/reporter';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { formatCheckReport, runEnvironmentCheck } from '../packages/cli/src/check.js';
@@ -214,6 +218,40 @@ describe('deploytruth check --environment', () => {
       expect(report.verdict).toBe('WARN');
       expect(report.environments[0]?.observation?.source?.provider).toBe('git');
       expect(process.exitCode).toBe(0);
+      const stored = await createReportHistoryStore(dir).list('example', 'production');
+      expect(stored.filter((entry) => entry.status === 'ok')).toHaveLength(1);
+    } finally {
+      log.mockRestore();
+      process.exitCode = previousExit;
+    }
+  });
+
+  it('writes one history run even when --output copies the report', async () => {
+    const dir = initRepo(tempDir('dt-check-output-history-'));
+    const head = git(['rev-parse', 'HEAD'], dir);
+    configureUpstream(dir, head);
+    const outputPath = join(dir, 'copy.json');
+    const previousExit = process.exitCode;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await createCli({
+        githubProvider: createFixtureGitHubProvider({ remoteSha: head }),
+        supabaseProvider: createFixtureSupabaseProvider(),
+      }).parseAsync([
+        'node',
+        'deploytruth',
+        'check',
+        '-c',
+        manifestAt(dir),
+        '-e',
+        'production',
+        '--output',
+        outputPath,
+      ]);
+      const stored = await createReportHistoryStore(dir).list('example', 'production');
+      expect(stored.filter((entry) => entry.status === 'ok')).toHaveLength(1);
+      expect(parseTruthReport(readFileSync(outputPath, 'utf8')).runId).toBe(stored[0]?.runId);
     } finally {
       log.mockRestore();
       process.exitCode = previousExit;
