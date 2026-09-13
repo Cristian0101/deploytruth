@@ -1,0 +1,74 @@
+name: DeployTruth Certify
+
+# Real infrastructure certification runs only on manual dispatch: secrets are step-scoped, the
+# event is trusted, and the job never runs against untrusted pull_request code. A push-triggered
+# certification is intentionally absent — Vercel production deploys converge asynchronously, so
+# certifying immediately after push could capture mid-rollout state. Trigger this after the
+# deployment you intend to certify exists.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Certify acceptance environment
+        id: deploytruth
+        uses: ./
+        with:
+          environment: acceptance
+          config: examples/live-acceptance/deploytruth.yml
+          fail-on: fail
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOYTRUTH_VERCEL_TOKEN: ${{ secrets.DEPLOYTRUTH_VERCEL_TOKEN }}
+          DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN: ${{ secrets.DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN }}
+          DEPLOYTRUTH_SUPABASE_DATABASE_URL: ${{ secrets.DEPLOYTRUTH_SUPABASE_DATABASE_URL }}
+
+      - name: Check DeployTruth outputs
+        if: always() && steps.deploytruth.outputs.run-id != ''
+        env:
+          VERDICT: ${{ steps.deploytruth.outputs.verdict }}
+          RUN_ID: ${{ steps.deploytruth.outputs.run-id }}
+          VERIFIED: ${{ steps.deploytruth.outputs.verified }}
+          WARNINGS: ${{ steps.deploytruth.outputs.warnings }}
+          FAILURES: ${{ steps.deploytruth.outputs.failures }}
+          FINDINGS: ${{ steps.deploytruth.outputs.findings }}
+          REPORT_PATH: ${{ steps.deploytruth.outputs.report-path }}
+          SUMMARY_PATH: ${{ steps.deploytruth.outputs.summary-path }}
+          METADATA_PATH: ${{ steps.deploytruth.outputs.metadata-path }}
+          ARTIFACT_DIR: ${{ steps.deploytruth.outputs.artifact-directory }}
+        run: |
+          case "$VERDICT" in
+            PASS|WARN|FAIL) ;;
+            *) echo "unexpected verdict output: $VERDICT" >&2; exit 1 ;;
+          esac
+          echo "$RUN_ID" | grep -Eq '^[0-9A-HJKMNP-TV-Z]{26}$' || {
+            echo "run-id is not a ULID: $RUN_ID" >&2; exit 1;
+          }
+          for value in "$VERIFIED" "$WARNINGS" "$FAILURES" "$FINDINGS"; do
+            case "$value" in
+              ''|*[!0-9]*) echo "non-numeric count output: $value" >&2; exit 1 ;;
+            esac
+          done
+          test -f "$REPORT_PATH"
+          test -f "$SUMMARY_PATH"
+          test -f "$METADATA_PATH"
+          test -d "$ARTIFACT_DIR"
+          echo "DeployTruth outputs verified: $VERDICT ($VERIFIED verified, $WARNINGS warnings, $FAILURES failures)"
+
+      - name: Upload DeployTruth evidence
+        if: always() && steps.deploytruth.outputs.artifact-directory != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploytruth-${{ steps.deploytruth.outputs.run-id }}
+          path: ${{ steps.deploytruth.outputs.artifact-directory }}
+          retention-days: 14
+          if-no-files-found: error

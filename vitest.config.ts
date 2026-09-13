@@ -11,6 +11,7 @@ export default defineConfig({
       '@deploytruth/config': pathFromRoot('./packages/config/src/index.ts'),
       '@deploytruth/providers': pathFromRoot('./packages/providers/src/index.ts'),
       '@deploytruth/reporter': pathFromRoot('./packages/reporter/src/index.ts'),
+      '@deploytruth/cli/check': pathFromRoot('./packages/cli/src/check.ts'),
     },
   },
   test: {

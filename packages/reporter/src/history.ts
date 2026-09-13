@@ -6,6 +6,7 @@ import { isRunId, type TruthReport, type Verdict } from '@deploytruth/core';
 import { writeFileAtomic } from './atomic-write.js';
 import { assertInside, filesystemKey, HistoryPathError } from './paths.js';
 import { parseStoredReport, serializeTruthReport } from './serializer.js';
+import { reportFindingCounts } from './summary.js';
 
 export class HistoryError extends Error {
   readonly code:
@@ -70,13 +71,7 @@ const sourceSha = (report: TruthReport): string | undefined => {
 };
 
 const summarize = (report: TruthReport): HistoryRunSummary => {
-  const warnings = report.findings.filter((finding) => finding.status === 'WARN').length;
-  const failures = report.findings.filter((finding) => finding.status === 'FAIL').length;
-  const total = report.environments.reduce(
-    (sum, environment) =>
-      sum + Object.values(environment.declaration.checks).filter(Boolean).length,
-    0,
-  );
+  const counts = reportFindingCounts(report);
   const sha = sourceSha(report);
   return {
     runId: report.runId,
@@ -85,10 +80,10 @@ const summarize = (report: TruthReport): HistoryRunSummary => {
     environment: environmentId(report),
     verdict: report.verdict,
     reportVersion: report.schemaVersion,
-    findingCount: report.findings.length,
-    warningCount: warnings,
-    failureCount: failures,
-    verifiedCount: Math.max(0, total - warnings - failures),
+    findingCount: counts.findings,
+    warningCount: counts.warnings,
+    failureCount: counts.failures,
+    verifiedCount: counts.verified,
     ...(sha === undefined ? {} : { sourceSha: sha }),
     status: 'ok',
     schemaVersion: report.schemaVersion,

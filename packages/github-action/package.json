@@ -4,12 +4,18 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@deploytruth/cli": "workspace:*",
+    "@deploytruth/core": "workspace:*",
+    "@deploytruth/reporter": "workspace:*",
+    "zod": "^3.24.1"
   }
 }

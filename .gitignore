@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The GitHub Action's bundled entrypoint is committed so `uses:` works without an install step.
+!packages/github-action/dist/
 coverage/
 playwright-report/
 test-results/
