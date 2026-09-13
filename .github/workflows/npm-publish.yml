@@ -1,0 +1,84 @@
+name: Publish npm release
+
+# This is intentionally dispatch-only. The selected ref must be the exact immutable version tag;
+# publishing from a branch or an arbitrary commit is refused before any release work starts.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact npm version to publish (for example, 0.1.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    if: >-
+      github.ref_type == 'tag' &&
+      github.ref == format('refs/tags/v{0}', inputs.version)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.2
+          package-manager-cache: false
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Verify the selected immutable tag and package version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          test "$tag" = "v$INPUT_VERSION"
+          test "$(node -p \"require('./packages/cli/package.json').version\")" = "$INPUT_VERSION"
+          test "$(git rev-parse --verify HEAD)" = "$(git rev-list -n 1 \"$tag\")"
+
+      - name: Refuse an existing npm version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "deploytruth@$INPUT_VERSION" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "deploytruth@$INPUT_VERSION already exists on npm"
+            exit 1
+          fi
+
+      - name: Install a Trusted Publishing capable npm CLI
+        run: |
+          set -euo pipefail
+          npm install --global npm@latest
+          npm --version
+
+      - name: Run the full release gate
+        run: pnpm release:check
+
+      - name: Pack and publish with npm OIDC provenance
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          destination="$(mktemp -d)"
+          pnpm --filter ./packages/cli pack --pack-destination "$destination"
+          tarball="$destination/deploytruth-$INPUT_VERSION.tgz"
+          test -f "$tarball"
+          npm publish "$tarball" --access public --provenance --registry=https://registry.npmjs.org/
+
+      - name: Verify the published registry version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(npm view "deploytruth@$INPUT_VERSION" version --registry=https://registry.npmjs.org/)" = "$INPUT_VERSION"
