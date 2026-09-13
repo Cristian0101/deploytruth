@@ -7,15 +7,15 @@ evaluates deterministic rules locally. A provider API object is never a core tru
 
 ## Package boundaries
 
-| Package                      | Owns                                                             | Must not own                              |
-| ---------------------------- | ---------------------------------------------------------------- | ----------------------------------------- |
-| `@deploytruth/core`          | Domain schemas, rules, verdicts, topology, redaction, comparison | Provider SDKs, filesystem I/O, CLI, React |
-| `@deploytruth/config`        | YAML parsing and manifest normalization                          | Provider calls, rule evaluation           |
-| `@deploytruth/providers`     | Read-only adapter contracts and fixture adapters                 | Verdict logic, report persistence         |
-| `@deploytruth/reporter`      | Safe JSON serialization and local report history                 | Raw payload parsing, rule evaluation      |
-| `@deploytruth/cli`           | Arguments, orchestration, output, exit policy                    | Provider-specific truth logic             |
-| `@deploytruth/web`           | Rendering a supplied `TruthReport` / `RunComparison`             | Rule evaluation or comparison calculation |
-| `@deploytruth/github-action` | Future CLI invocation contract                                   | A second truth engine                     |
+| Package                      | Owns                                                                                     | Must not own                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `@deploytruth/core`          | Domain schemas, rules, verdicts, topology, redaction, comparison                         | Provider SDKs, filesystem I/O, CLI, React     |
+| `@deploytruth/config`        | YAML parsing and manifest normalization                                                  | Provider calls, rule evaluation               |
+| `@deploytruth/providers`     | Read-only adapter contracts and fixture adapters                                         | Verdict logic, report persistence             |
+| `@deploytruth/reporter`      | Safe JSON serialization and local report history                                         | Raw payload parsing, rule evaluation          |
+| `@deploytruth/cli`           | Arguments, orchestration, output, exit policy                                            | Provider-specific truth logic                 |
+| `@deploytruth/web`           | Rendering a supplied `TruthReport` / `RunComparison`                                     | Rule evaluation or comparison calculation     |
+| `@deploytruth/github-action` | CI adapter behind the root `action.yml` (Job Summary, outputs, evidence bundle, fail-on) | Truth logic, provider calls, a second verdict |
 
 The dependency direction is intentionally one-way:
 
@@ -230,4 +230,8 @@ M5 adds fresh runtime identity, presence-only environment evidence, URL-derived 
 identity, a harmless live connection probe, and distinct deployment-to-runtime and
 runtime-to-database topology edges (`docs/runtime-truth.md`, ADR 007). M6 renders that topology
 locally. M7 stores each completed report locally and compares runs semantically
-(`docs/report-history.md`, ADR 008). Every adapter milestone starts with fixtures.
+(`docs/report-history.md`, ADR 008). M8 wraps the same `runEnvironmentCheck` orchestration in a
+bundled JavaScript Action (`packages/github-action`, root `action.yml`): it emits the GitHub Job
+Summary, step outputs, and an atomic `RUNNER_TEMP` evidence bundle built from the single
+`TruthReport` — never a second engine (`docs/github-action.md`). Every adapter milestone starts
+with fixtures.
