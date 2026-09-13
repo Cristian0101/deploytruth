@@ -54,6 +54,11 @@ The Action requires no install step: the shipped entrypoint at
 `packages/github-action/dist/index.js` is a self-contained bundle of the truth engine and its
 runtime dependencies.
 
+Two refs serve the Action: `v0` is the moving pre-1.0 major ref that tracks certified releases,
+and `v0.1.0`-style tags are immutable version pins. Use `@v0` for the normal consumption path;
+pin `@v0.1.0` (or a commit SHA) when a workflow needs an exact, unchanging artifact. See
+[docs/releasing.md](releasing.md) for the release procedure that advances them.
+
 ## Inputs
 
 | Input         | Required | Default           | Meaning                                                       |
