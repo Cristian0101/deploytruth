@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">DeployTruth GitHub Action passing job summary</title>
+  <desc id="desc">A rendered example showing a PASS verdict, seven verified checks, zero warnings, and zero failures.</desc>
+  <rect width="1200" height="560" rx="24" fill="#0b1118"/>
+  <rect x="1" y="1" width="1198" height="558" rx="23" fill="none" stroke="#273647" stroke-width="2"/>
+  <text x="56" y="72" fill="#8ba0b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="3">GITHUB ACTION JOB SUMMARY</text>
+  <text x="56" y="137" fill="#f3f7fb" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" font-size="42">DeployTruth — production</text>
+  <rect x="970" y="92" width="154" height="58" rx="29" fill="#0b302c" stroke="#35e6bd"/>
+  <circle cx="1006" cy="121" r="12" fill="#35e6bd"/>
+  <path d="M1000 121l4 4 8-9" fill="none" stroke="#071714" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1030" y="129" fill="#4ff0ca" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="22">PASS</text>
+  <line x1="56" y1="178" x2="1144" y2="178" stroke="#273647"/>
+  <text x="56" y="228" fill="#f3f7fb" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-weight="700" font-size="25">7 verified</text>
+  <text x="242" y="228" fill="#8ba0b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">0 warnings</text>
+  <text x="420" y="228" fill="#8ba0b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">0 failures</text>
+  <rect x="56" y="270" width="1088" height="214" rx="14" fill="#0e1822" stroke="#273647"/>
+  <text x="84" y="314" fill="#8ba0b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17">CHECK</text>
+  <text x="996" y="314" fill="#8ba0b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17">STATUS</text>
+  <line x1="76" y1="334" x2="1124" y2="334" stroke="#273647"/>
+  <text x="84" y="375" fill="#f3f7fb" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="21">Source → deployment</text>
+  <text x="984" y="375" fill="#4ff0ca" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="18">VERIFIED</text>
+  <text x="84" y="417" fill="#f3f7fb" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="21">Deployment → runtime</text>
+  <text x="984" y="417" fill="#4ff0ca" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="18">VERIFIED</text>
+  <text x="84" y="459" fill="#f3f7fb" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="21">Runtime → database · migration history</text>
+  <text x="984" y="459" fill="#4ff0ca" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="700" font-size="18">VERIFIED</text>
+  <text x="56" y="526" fill="#71849a" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="17">Rendered example of the sanitized summary format — DeployTruth generates evidence; GitHub stores it.</text>
+</svg>
