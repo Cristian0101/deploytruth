@@ -38,6 +38,11 @@
     "pack:check": "node ../../scripts/pack-check.mjs"
   },
   "devDependencies": {
+    "@deploytruth/config": "workspace:*",
+    "@deploytruth/core": "workspace:*",
+    "@deploytruth/providers": "workspace:*",
+    "@deploytruth/reporter": "workspace:*",
+    "@deploytruth/web": "workspace:*",
     "commander": "^14.0.2",
     "open": "^11.0.3"
   }
