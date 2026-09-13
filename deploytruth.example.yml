@@ -18,7 +18,7 @@ environments:
       provider: supabase
       project_ref: prodabc123
       migrations:
-        directory: examples/live-acceptance/supabase/migrations
+        directory: supabase/migrations
     runtime:
       url: https://example-app.example.com/api/deploytruth/runtime
       expected_environment: production

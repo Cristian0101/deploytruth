@@ -31,3 +31,5 @@ jobs:
       - run: pnpm build
       - name: Verify the committed Action bundle matches its sources
         run: git diff --exit-code -- packages/github-action/dist
+      - name: Verify npm package contents and external-consumer install
+        run: node scripts/pack-check.mjs && node scripts/external-consumer-smoke.mjs

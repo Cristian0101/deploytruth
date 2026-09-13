@@ -13,7 +13,7 @@ evaluates deterministic rules locally. A provider API object is never a core tru
 | `@deploytruth/config`        | YAML parsing and manifest normalization                                                  | Provider calls, rule evaluation               |
 | `@deploytruth/providers`     | Read-only adapter contracts and fixture adapters                                         | Verdict logic, report persistence             |
 | `@deploytruth/reporter`      | Safe JSON serialization and local report history                                         | Raw payload parsing, rule evaluation          |
-| `@deploytruth/cli`           | Arguments, orchestration, output, exit policy                                            | Provider-specific truth logic                 |
+| `deploytruth` (CLI)          | Arguments, orchestration, output, exit policy                                            | Provider-specific truth logic                 |
 | `@deploytruth/web`           | Rendering a supplied `TruthReport` / `RunComparison`                                     | Rule evaluation or comparison calculation     |
 | `@deploytruth/github-action` | CI adapter behind the root `action.yml` (Job Summary, outputs, evidence bundle, fail-on) | Truth logic, provider calls, a second verdict |
 

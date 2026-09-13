@@ -1,28 +1,48 @@
 {
-  "name": "@deploytruth/cli",
+  "name": "deploytruth",
   "version": "0.1.0",
-  "private": true,
+  "description": "git status for your deployed application — verify declared deployment topology against observed provider state",
+  "license": "Apache-2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cristian0101/deploytruth.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/Cristian0101/deploytruth",
+  "bugs": "https://github.com/Cristian0101/deploytruth/issues",
+  "keywords": [
+    "deployment-verification",
+    "truth-report",
+    "release-certification",
+    "ci",
+    "vercel",
+    "supabase"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "bin": {
     "deploytruth": "./dist/index.js"
   },
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "pnpm run build:web && pnpm run build:cli && pnpm run copy:web",
     "build:web": "pnpm --filter @deploytruth/web build",
-    "build:cli": "tsup src/index.ts --format esm --dts --clean",
+    "build:cli": "tsup --config tsup.config.ts",
     "copy:web": "node scripts/copy-web.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pack:check": "node ../../scripts/pack-check.mjs"
   },
-  "dependencies": {
+  "devDependencies": {
     "@deploytruth/config": "workspace:*",
     "@deploytruth/core": "workspace:*",
     "@deploytruth/providers": "workspace:*",
     "@deploytruth/reporter": "workspace:*",
+    "@deploytruth/web": "workspace:*",
     "commander": "^14.0.2",
     "open": "^11.0.3"
   }

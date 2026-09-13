@@ -1,5 +1,5 @@
 {
-  "name": "deploytruth",
+  "name": "deploytruth-workspace",
   "version": "0.1.0",
   "private": true,
   "description": "git status for your deployed application",
@@ -17,7 +17,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "release:check": "pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build && pnpm release:check:artifacts && pnpm test:e2e",
+    "release:check:artifacts": "git diff --exit-code -- packages/github-action/dist && node scripts/pack-check.mjs && node scripts/external-consumer-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

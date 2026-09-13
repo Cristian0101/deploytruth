@@ -15,7 +15,7 @@ environments:
       target: production
     database:
       provider: supabase
-      project_ref: replace-with-project-ref
+      project_ref: yourprojectref000
     runtime:
       url: https://example.com/api/deploytruth/runtime
       expected_environment: production

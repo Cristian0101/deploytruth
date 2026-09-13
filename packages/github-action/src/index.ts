@@ -2,7 +2,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import * as core from '@actions/core';
-import { runEnvironmentCheck } from '@deploytruth/cli/check';
+import { runEnvironmentCheck } from 'deploytruth/check';
 import { writeLocalReport } from '@deploytruth/reporter';
 
 import { runAction, type ActionIO } from './action.js';
