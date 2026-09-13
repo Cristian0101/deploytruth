@@ -19,6 +19,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The acceptance Supabase pooler chains to Supabase Root 2021 CA, which is not in the
+      # GitHub-hosted runner trust store. Verify the committed public root before adding it to
+      # Node's normal trust store for the secret-bearing certification step only.
+      - name: Verify pinned Supabase CA
+        id: supabase-ca
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate="$GITHUB_WORKSPACE/.github/trust/supabase-root-2021-ca.crt"
+          expected_fingerprint='80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA'
+          test -s "$certificate"
+          ! grep -q -- 'PRIVATE KEY' "$certificate"
+          actual_fingerprint="$(openssl x509 -in "$certificate" -noout -fingerprint -sha256 | cut -d= -f2)"
+          test "$actual_fingerprint" = "$expected_fingerprint"
+          openssl x509 -in "$certificate" -noout -checkend 86400
+
       - name: Certify acceptance environment
         id: deploytruth
         uses: ./
@@ -31,6 +47,7 @@ jobs:
           DEPLOYTRUTH_VERCEL_TOKEN: ${{ secrets.DEPLOYTRUTH_VERCEL_TOKEN }}
           DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN: ${{ secrets.DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN }}
           DEPLOYTRUTH_SUPABASE_DATABASE_URL: ${{ secrets.DEPLOYTRUTH_SUPABASE_DATABASE_URL }}
+          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/trust/supabase-root-2021-ca.crt
 
       - name: Check DeployTruth outputs
         if: always() && steps.deploytruth.outputs.run-id != ''

@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,8 @@ const actionPackage = join(root, 'packages', 'github-action');
 const actionEntry = join(actionPackage, 'dist', 'index.js');
 
 const ACTION_YML = join(root, 'action.yml');
+const CERTIFY_WORKFLOW = join(root, '.github', 'workflows', 'deploytruth-certify.yml');
+const SUPABASE_CA = join(root, '.github', 'trust', 'supabase-root-2021-ca.crt');
 
 /**
  * Extracts `name:` keys from a top-level action.yml block (`inputs:`/`outputs:`). Narrow on
@@ -135,6 +138,27 @@ describe('action.yml contract', () => {
     const yaml = readFileSync(ACTION_YML, 'utf8');
     expect(yaml).toContain('using: node24');
     expect(yaml).toContain('main: packages/github-action/dist/index.js');
+  });
+});
+
+describe('acceptance workflow TLS trust bootstrap', () => {
+  it('pins a public Supabase CA without weakening peer verification', () => {
+    const workflow = readFileSync(CERTIFY_WORKFLOW, 'utf8');
+    const certificateText = readFileSync(SUPABASE_CA, 'utf8');
+    const certificate = new X509Certificate(certificateText);
+
+    expect(certificateText).not.toContain('PRIVATE KEY');
+    expect(certificate.subject).toContain('CN=Supabase Root 2021 CA');
+    expect(certificate.fingerprint256).toBe(
+      '80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA',
+    );
+    expect(Date.parse(certificate.validTo)).toBeGreaterThan(Date.now() + 86_400_000);
+    expect(workflow).toContain(
+      'NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/trust/supabase-root-2021-ca.crt',
+    );
+    expect(workflow).toContain('openssl x509 -in "$certificate" -noout -checkend 86400');
+    expect(workflow).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED');
+    expect(workflow).not.toContain('rejectUnauthorized: false');
   });
 });
 
