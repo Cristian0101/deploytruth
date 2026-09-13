@@ -89,4 +89,17 @@ describe('GitHub Action release surface', () => {
       'runEnvironmentCheck',
     );
   });
+
+  it('keeps RC distribution certification remote and incapable of publishing', () => {
+    const workflow = readText('.github/workflows/release-candidate.yml');
+    expect(workflow).toContain('ubuntu-latest');
+    expect(workflow).toContain('macos-latest');
+    expect(workflow).toContain('actions/upload-artifact@v7');
+    expect(workflow).toContain('actions/download-artifact@v7');
+    expect(workflow).toContain('scripts/external-consumer-smoke.mjs');
+    expect(workflow).toContain('retention-days: 7');
+    expect(workflow).not.toMatch(/id-token:\s*write/);
+    expect(workflow).not.toMatch(/npm\s+(?:stage\s+)?publish/);
+    expect(workflow).not.toMatch(/NODE_AUTH_TOKEN|NPM_TOKEN/);
+  });
 });
