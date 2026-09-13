@@ -84,6 +84,30 @@ History view. `history` lists stored local runs. `diff` compares two runs semant
 by default). See the [local visual report](docs/local-visual-report.md) and
 [report history](docs/report-history.md).
 
+## GitHub Action
+
+DeployTruth ships a self-contained JavaScript Action (the root `action.yml`) that runs the same
+truth engine inside CI: one invocation produces one `TruthReport`, a Job Summary,
+machine-readable outputs, and a sanitized `truth-report.json` / `summary.md` /
+`ci-metadata.json` evidence bundle, gated by a `fail-on` (`fail` | `warn` | `never`) policy.
+
+```yaml
+- id: deploytruth
+  uses: Cristian0101/deploytruth@v0 # pre-1.0
+  with:
+    environment: production
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    DEPLOYTRUTH_VERCEL_TOKEN: ${{ secrets.DEPLOYTRUTH_VERCEL_TOKEN }}
+    DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN: ${{ secrets.DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN }}
+    DEPLOYTRUTH_SUPABASE_DATABASE_URL: ${{ secrets.DEPLOYTRUTH_SUPABASE_DATABASE_URL }}
+```
+
+Run it only from trusted events — `workflow_dispatch`, protected-branch pushes, or trusted
+post-deployment workflows. The Action refuses `pull_request_target` outright and never forwards
+secrets to fork PRs. See [`docs/github-action.md`](docs/github-action.md) for the full contract,
+exit-policy matrix, artifact layout, and security model.
+
 ## Security model
 
 DeployTruth uses GET-only provider transports and a PostgreSQL read-only transaction with a fixed
@@ -110,8 +134,11 @@ target.
 - `packages/core` — truth domain, rules, report, topology, comparison, and safety primitives.
 - `packages/config` — schema-first YAML manifest parser.
 - `packages/providers` — read-only GitHub, Vercel, Supabase, PostgreSQL, and Git adapters.
-- `packages/reporter` — safe report serialization and local report history.
+- `packages/reporter` — safe report serialization, local report history, and the shared
+  human-readable report summary.
 - `packages/cli` — command shell and orchestration.
+- `packages/github-action` — CI adapter behind the root `action.yml`; wraps `runEnvironmentCheck`
+  and contains no truth logic of its own.
 - `apps/web` — local report viewer; it does not evaluate rules or comparisons.
 - `examples/live-acceptance` — tiny GitHub → Vercel → Supabase dogfood fixture.
 - `fixtures` and `tests` — sanitized observations and deterministic certification scenarios.
@@ -122,6 +149,8 @@ target.
   truth — implemented.
 - M6: loopback-only visual Truth Map, evidence Inspector, and local report UX — implemented.
 - M7: local report history and semantic run comparison — implemented.
+- M8: distributable GitHub Action — Job Summary, machine outputs, sanitized evidence bundle,
+  and a `fail-on` policy over the same truth engine — implemented.
 - Later: expand provider coverage and harden the pre-1.0 CLI based on real-world use.
 
 DeployTruth is not yet published to npm and does not claim production maturity.

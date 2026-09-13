@@ -29,3 +29,5 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
+      - name: Verify the committed Action bundle matches its sources
+        run: git diff --exit-code -- packages/github-action/dist

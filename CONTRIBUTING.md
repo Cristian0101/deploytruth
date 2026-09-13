@@ -17,6 +17,11 @@ pnpm test
 pnpm build
 ```
 
+`pnpm build` also rebuilds `packages/github-action/dist/index.js` — the committed bundle the
+root `action.yml` executes. CI fails if the committed bundle drifts from its sources, so always
+rebuild and commit it after touching anything the Action can reach
+(`packages/github-action`, `cli`, `reporter`, `core`, `config`, `providers`).
+
 Before opening a pull request, run every command above and describe the behavior change, evidence,
 and security implications. Add or update tests for changed truth semantics.
 

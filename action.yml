@@ -1,0 +1,55 @@
+name: DeployTruth
+
+description: >-
+  Certify that declared deployment truth matches observed provider state. Produces one
+  normalized TruthReport, a Job Summary, machine-readable outputs, and a sanitized evidence
+  bundle. DeployTruth is pre-1.0: inputs, outputs, and report schema may still change.
+
+author: Cristian0101
+
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  environment:
+    description: Declared environment to certify (must exist in the manifest).
+    required: true
+  config:
+    description: Repository-relative path to deploytruth.yml.
+    required: false
+    default: deploytruth.yml
+  fail-on:
+    description: >-
+      Exit policy for a valid truth verdict — "fail" fails only on FAIL, "warn" fails on WARN
+      or FAIL, "never" never fails on a verdict. Execution errors always fail the step.
+    required: false
+    default: fail
+
+outputs:
+  verdict:
+    description: Truth verdict of the run — PASS, WARN, or FAIL.
+  run-id:
+    description: The TruthReport run ID (26-character Crockford ULID).
+  verified:
+    description: Number of enabled checks with no warning or failure findings.
+  warnings:
+    description: Number of WARN findings.
+  failures:
+    description: Number of FAIL findings.
+  findings:
+    description: Total number of findings in the report.
+  report-path:
+    description: Runner-temp path of the sanitized truth-report.json evidence file.
+  summary-path:
+    description: Runner-temp path of the summary.md evidence file.
+  metadata-path:
+    description: Runner-temp path of the ci-metadata.json provenance file.
+  artifact-directory:
+    description: Runner-temp directory containing the complete CI evidence bundle.
+  environment:
+    description: The environment that was certified.
+
+runs:
+  using: node24
+  main: packages/github-action/dist/index.js

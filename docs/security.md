@@ -167,6 +167,32 @@ read-only history and comparison endpoints; there is no deletion, mutation, or s
 history. Static `--report` mode does not search nearby directories for history. See
 `docs/report-history.md`.
 
+## GitHub Actions execution
+
+The M8 Action wraps `runEnvironmentCheck`; it adds no provider access and no mutation surface of
+its own. Its boundaries:
+
+- `config` input resolves strictly under `GITHUB_WORKSPACE`; absolute paths, `..`, `.`, empty
+  segments, backslashes, NUL, and control characters are rejected before the filesystem is
+  touched.
+- `pull_request_target` is refused outright: trusted workflow code plus untrusted checkout plus
+  exposed secrets is not a certification DeployTruth will perform. Fork `pull_request` runs get
+  no secrets from GitHub and DeployTruth never forwards any.
+- Provider credentials arrive only through step-scoped environment variables under the same
+  names the adapters already resolve. They are never Action inputs, never logged, never written
+  to outputs, and never copied into the evidence bundle (tests inject sentinel secrets and scan
+  every produced file, output, and log line).
+- The Job Summary is generated Markdown: finding/declaration text is escaped so tables, raw
+  HTML, links, and `::` workflow commands cannot be injected, and output size is bounded.
+- Step outputs and workflow commands go through the official `@actions/core` toolkit — no
+  hand-constructed `::set-output`/`::warning` strings.
+- `ci-metadata.json` is a strict allowlisted schema of CI provenance (workflow/run/ref/verdict);
+  actor identity, event payloads, server URLs, and environment dumps are excluded by
+  construction, and malformed context values are dropped rather than trusted.
+- The evidence bundle is validated, staged, and atomically renamed under `RUNNER_TEMP`; it is
+  uploaded by the workflow's official `actions/upload-artifact` step, not by DeployTruth.
+- Workflows need only `contents: read`. No Checks API, no `id-token`, no write scopes.
+
 ## Adapter review checklist
 
 - Does it use only read-only API operations?
