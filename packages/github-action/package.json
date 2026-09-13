@@ -13,9 +13,9 @@
   },
   "dependencies": {
     "@actions/core": "^3.0.1",
-    "@deploytruth/cli": "workspace:*",
     "@deploytruth/core": "workspace:*",
     "@deploytruth/reporter": "workspace:*",
+    "deploytruth": "workspace:*",
     "zod": "^3.24.1"
   }
 }

@@ -79,19 +79,7 @@ importers:
         version: 7.3.6(@types/node@24.13.4)(tsx@4.23.13)(yaml@2.9.0)
 
   packages/cli:
-    dependencies:
-      '@deploytruth/config':
-        specifier: workspace:*
-        version: link:../config
-      '@deploytruth/core':
-        specifier: workspace:*
-        version: link:../core
-      '@deploytruth/providers':
-        specifier: workspace:*
-        version: link:../providers
-      '@deploytruth/reporter':
-        specifier: workspace:*
-        version: link:../reporter
+    devDependencies:
       commander:
         specifier: ^14.0.2
         version: 14.0.3
@@ -122,15 +110,15 @@ importers:
       '@actions/core':
         specifier: ^3.0.1
         version: 3.0.1
-      '@deploytruth/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@deploytruth/core':
         specifier: workspace:*
         version: link:../core
       '@deploytruth/reporter':
         specifier: workspace:*
         version: link:../reporter
+      deploytruth:
+        specifier: workspace:*
+        version: link:../cli
       zod:
         specifier: ^3.24.1
         version: 3.25.76

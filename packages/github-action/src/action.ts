@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 
-import type { CheckExecution, CheckOptions } from '@deploytruth/cli/check';
+import type { CheckExecution, CheckOptions } from 'deploytruth/check';
 import { redactText, type TruthReport } from '@deploytruth/core';
 import {
   buildTruthSummaryMarkdown,

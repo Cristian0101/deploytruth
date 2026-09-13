@@ -39,10 +39,28 @@ missing instead of fabricating certainty.
 - No infrastructure mutation: checks observe; they do not repair or deploy.
 - Honest uncertainty: unavailable evidence remains `UNKNOWN` or a warning.
 
-## Development and installation
+## Install the CLI
 
-DeployTruth currently runs from source and requires Node.js 22 or later. The repository pins pnpm
-through the `packageManager` field.
+The `deploytruth` package is a self-contained Node.js CLI — it needs Node.js 22 or later and
+nothing else.
+
+```bash
+npm install -g deploytruth
+deploytruth --help
+```
+
+or run it without installing:
+
+```bash
+npx deploytruth --help
+```
+
+DeployTruth is verified on macOS and Linux (CI). Windows is not yet certified.
+
+## Develop DeployTruth
+
+Contributors run from source with Node.js 22 or later and the pnpm version pinned through the
+`packageManager` field.
 
 ```bash
 corepack enable
@@ -55,7 +73,8 @@ pnpm build
 ```
 
 The E2E seam is available as `pnpm test:e2e`. On a new machine, install its browser with
-`pnpm exec playwright install chromium`.
+`pnpm exec playwright install chromium`. `pnpm release:check` runs the full release gate,
+including npm package validation and an external-consumer smoke test.
 
 ## Configuration
 
@@ -67,12 +86,16 @@ Git. A smaller declaration is available at
 ## CLI usage
 
 ```bash
-node packages/cli/dist/index.js doctor --config deploytruth.yml
-node packages/cli/dist/index.js check --config deploytruth.yml --environment production
-node packages/cli/dist/index.js open --config deploytruth.yml --environment production
-node packages/cli/dist/index.js history --config deploytruth.yml --environment production
-node packages/cli/dist/index.js diff --config deploytruth.yml --environment production
+deploytruth init                                     # write a starter deploytruth.yml
+deploytruth doctor                                   # validate manifest and provider access
+deploytruth check --environment production           # PASS / WARN / FAIL with findings
+deploytruth open --environment production            # private loopback visual report
+deploytruth history --environment production         # stored local runs
+deploytruth diff --environment production            # compare two runs semantically
 ```
+
+From a source checkout, the same commands run as `node packages/cli/dist/index.js …` after
+`pnpm build`.
 
 `doctor` validates configuration and provider access. `check` compares local Git, authoritative
 GitHub source, Vercel production deployment, fresh runtime attestation, runtime Supabase target and
@@ -136,7 +159,8 @@ target.
 - `packages/providers` — read-only GitHub, Vercel, Supabase, PostgreSQL, and Git adapters.
 - `packages/reporter` — safe report serialization, local report history, and the shared
   human-readable report summary.
-- `packages/cli` — command shell and orchestration.
+- `packages/cli` — the published `deploytruth` npm package: command shell and orchestration
+  bundled into a single self-contained executable.
 - `packages/github-action` — CI adapter behind the root `action.yml`; wraps `runEnvironmentCheck`
   and contains no truth logic of its own.
 - `apps/web` — local report viewer; it does not evaluate rules or comparisons.
@@ -153,7 +177,8 @@ target.
   and a `fail-on` policy over the same truth engine — implemented.
 - Later: expand provider coverage and harden the pre-1.0 CLI based on real-world use.
 
-DeployTruth is not yet published to npm and does not claim production maturity.
+DeployTruth is pre-1.0 software: interfaces, configuration, and report schemas may change
+between minor releases. See [docs/releasing.md](docs/releasing.md) for the release procedure.
 
 ## Contributing
 

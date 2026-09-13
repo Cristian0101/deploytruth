@@ -48,13 +48,12 @@ import {
 import { Command } from 'commander';
 import openBrowser from 'open';
 
+import packageJson from '../package.json';
 import { formatCheckReport, runEnvironmentCheck, selectEnvironment } from './check.js';
 import { formatRunComparison } from './diff.js';
 import { formatHistoryList } from './history.js';
 import { startLocalReportServer } from './open.js';
 import { SAMPLE_MANIFEST } from './sample-manifest.js';
-
-const FOUNDATION_MESSAGE = 'This command arrives in a later milestone.';
 
 const safeErrorMessage = (error: unknown): string =>
   redactText(error instanceof Error ? error.message : 'Unknown error');
@@ -142,7 +141,7 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
   program
     .name('deploytruth')
     .description('Deterministic deployment topology verification')
-    .version('0.1.0');
+    .version(packageJson.version);
 
   program
     .command('init')
@@ -681,20 +680,5 @@ export const createCli = (dependencies: CliDependencies = {}): Command => {
       }
     });
 
-  program
-    .command('map')
-    .description('map command shell; arrives in a later milestone')
-    .option('-c, --config <path>', 'manifest path', 'deploytruth.yml')
-    .option('-e, --environment <name>', 'declared environment')
-    .action(() => {
-      console.error(FOUNDATION_MESSAGE);
-      process.exitCode = 2;
-    });
-
   return program;
 };
-
-const invokedAsCli = process.argv[1]?.endsWith('index.js') ?? false;
-if (invokedAsCli) {
-  await createCli().parseAsync(process.argv);
-}
