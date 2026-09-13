@@ -1,8 +1,8 @@
 # CLI reference
 
-The release package exposes one binary: `deploytruth`. It requires Node.js 22 or later. Until the
-package is published, replace `deploytruth` with `node packages/cli/dist/index.js` from a built
-source checkout.
+The published `deploytruth` package exposes one binary: `deploytruth`. It requires Node.js 22 or
+later. Run `npx deploytruth@0.1.0 --version` to verify the current v0.1.0 release, or
+`npx deploytruth --help` to use the latest compatible release without a global install.
 
 ## Common flow
 
