@@ -8,10 +8,6 @@ name: DeployTruth Certify
 
 on:
   workflow_dispatch:
-  # Temporary pre-merge dogfood trigger: workflow_dispatch only registers once this file exists
-  # on the default branch. Removed before merge; the merged workflow is dispatch-only.
-  push:
-    branches: [codex/m8-ci-truth-certification]
 
 permissions:
   contents: read
