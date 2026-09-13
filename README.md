@@ -1,6 +1,8 @@
 # DeployTruth
 
 [![CI](https://github.com/Cristian0101/deploytruth/actions/workflows/ci.yml/badge.svg)](https://github.com/Cristian0101/deploytruth/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/deploytruth.svg)](https://www.npmjs.com/package/deploytruth)
+[![GitHub Release](https://img.shields.io/github/v/release/Cristian0101/deploytruth?display_name=tag)](https://github.com/Cristian0101/deploytruth/releases)
 [![Node.js 22+](https://img.shields.io/badge/node-22%2B-3c873a)](package.json)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -68,7 +70,13 @@ DeployTruth requires Node.js 22 or later.
 
 ### CLI user
 
-Run without installing:
+Verify the current public release without installing:
+
+```bash
+npx deploytruth@0.1.0 --version
+```
+
+Then run the latest compatible CLI without a global install:
 
 ```bash
 npx deploytruth --help
@@ -93,6 +101,13 @@ deploytruth open --environment production
 
 See [configuration](docs/configuration.md) for the manifest and credential variable names, and
 [CLI reference](docs/cli.md) for flags and exit behavior.
+
+## Who DeployTruth is for
+
+DeployTruth is for developers shipping modern applications across managed infrastructure: indie
+hackers, technical founders, full-stack developers, small engineering teams, and AI-assisted
+builders. It is especially useful when GitHub, Vercel, and Supabase each look healthy but you
+need independent evidence that their relationships are correct.
 
 ## Configuration
 
@@ -160,6 +175,12 @@ History. It does not contact providers from the browser or evaluate a second set
 The JavaScript Action runs the same truth engine and produces a GitHub Job Summary, machine
 outputs, and a sanitized evidence bundle. Use the moving `v0` ref for compatible pre-1.0 releases,
 or pin an immutable version tag when a workflow needs an exact artifact.
+
+For an immutable v0.1.0 Action pin, use:
+
+```yaml
+uses: Cristian0101/deploytruth@v0.1.0
+```
 
 <!-- docs-test:action-example:start -->
 
