@@ -54,7 +54,7 @@ describe('public documentation', () => {
       '<!-- docs-test:action-example:end -->',
     );
     expect(parseDocument(yaml).errors).toEqual([]);
-    expect(read('README.md')).toContain('does not exist until the release phase creates it');
+    expect(read('README.md')).toContain('Use the moving `v0` ref for compatible pre-1.0 releases');
   });
 
   it('documents every current CLI command and check key', () => {

@@ -133,7 +133,7 @@ for the additional human review boundary.
 9. Publish the prepared GitHub Release notes from `docs/releases/v0.1.0.md`.
 10. Create `v0` at the same commit; for later compatible 0.x releases, move only `v0` forward.
 11. Verify remote Actions at both `@v0.1.0` and `@v0` and compare their outputs.
-12. Apply the release-day README switch described below.
+12. Verify public installation and Action references in the rendered README and package docs.
 13. Verify the rendered npm page, GitHub README, demo assets, social preview, and links.
 14. Configure the future stage-only npm Trusted Publisher and disallow traditional publish tokens.
 15. Post only the explicitly approved launch announcements.
@@ -142,17 +142,13 @@ for the additional human review boundary.
 Never move `v0.1.0`. If it is broken, publish and tag `v0.1.1`; immutable release history is not
 rewritten.
 
-## Release-day README switch
+## First-public-release documentation
 
-Immediately after the registry package and both Action refs resolve:
-
-- In `README.md`, remove the release-candidate callout and the source-checkout-only fallback.
-- Change "After the first npm release" to direct `npx deploytruth` usage.
-- Remove the statements that `v0` does not exist yet and that the Action example is only intended.
-- In `packages/cli/README.md`, remove the release-candidate note and the sentence that `v0` does not
-  resolve yet.
-
-Do not apply this patch before publication; the current wording is intentionally honest.
+Before certifying the first public package, make the README, package README, and Action guide use
+the actual public installation and Action references. Merge that narrow documentation correction
+through protected `main`, then rebuild and re-certify the exact package artifact before publishing.
+The package README must never claim that its own published install command or Action reference is
+unavailable.
 
 ## Notes
 
