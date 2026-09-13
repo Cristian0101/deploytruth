@@ -19,9 +19,8 @@ shows where declared state and observed reality diverge.
 The healthy frame is a controlled live-acceptance report. The failure and regression frames use
 certified deterministic fixtures; they do not represent a current production incident.
 
-> **Release candidate:** DeployTruth is pre-1.0 and has not been published to npm yet. The npm and
-> GitHub Action examples below are the intended v0.1 install paths; use the source-checkout path to
-> evaluate the current candidate today.
+DeployTruth is an early, pre-1.0 open-source release. Interfaces, configuration, and report
+schemas may still change.
 
 ## The problem
 
@@ -69,7 +68,7 @@ DeployTruth requires Node.js 22 or later.
 
 ### CLI user
 
-After the first npm release, run without installing:
+Run without installing:
 
 ```bash
 npx deploytruth --help
@@ -90,17 +89,6 @@ deploytruth init
 deploytruth doctor
 deploytruth check --environment production
 deploytruth open --environment production
-```
-
-Until npm publication, evaluate the exact release candidate from a source checkout:
-
-```bash
-git clone https://github.com/Cristian0101/deploytruth.git
-cd deploytruth
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node packages/cli/dist/index.js --help
 ```
 
 See [configuration](docs/configuration.md) for the manifest and credential variable names, and
@@ -170,8 +158,8 @@ History. It does not contact providers from the browser or evaluate a second set
 ## CI certification
 
 The JavaScript Action runs the same truth engine and produces a GitHub Job Summary, machine
-outputs, and a sanitized evidence bundle. The `v0` ref shown here is the intended moving pre-1.0
-release ref and **does not exist until the release phase creates it**.
+outputs, and a sanitized evidence bundle. Use the moving `v0` ref for compatible pre-1.0 releases,
+or pin an immutable version tag when a workflow needs an exact artifact.
 
 <!-- docs-test:action-example:start -->
 
@@ -190,7 +178,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: deploytruth
-        uses: Cristian0101/deploytruth@v0 # available after the first release
+        uses: Cristian0101/deploytruth@v0
         with:
           environment: production
           fail-on: fail
@@ -285,17 +273,16 @@ part of normalized reports or local history.
 **Why does it need database access?** To verify database identity and migration metadata through
 a fixed read-only inspection surface. A dedicated read-only role is sufficient.
 
-**Can I run it in CI?** Yes. Use the JavaScript Action after its release ref exists, or `uses: ./`
-inside this repository today.
+**Can I run it in CI?** Yes. Use the JavaScript Action with `@v0` for the moving compatible ref,
+or `@v0.1.0` for an immutable version pin. Contributors can use `uses: ./` inside this repository.
 
 ## Status
 
-DeployTruth is preparing its first pre-1.0 release. M1–M8 are implemented: local and remote source
-truth, Vercel deployment truth, Supabase identity and migrations, runtime connection truth, the
-visual Truth Map, local history/comparison, packaging, and GitHub Actions certification.
+DeployTruth v0.1.0 is the first pre-1.0 release. It includes local and remote source truth, Vercel
+deployment truth, Supabase identity and migrations, runtime connection truth, the visual Truth
+Map, local history/comparison, packaging, and GitHub Actions certification.
 
-Interfaces, configuration, and report schemas may change between minor releases. There is no npm
-publication, `v0.1.0` tag, moving `v0` ref, or GitHub Release yet.
+Interfaces, configuration, and report schemas may change between minor releases.
 
 ## Documentation
 

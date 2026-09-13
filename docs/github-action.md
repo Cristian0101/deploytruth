@@ -12,10 +12,6 @@ four surfaces:
 
 DeployTruth is pre-1.0. The Action's inputs, outputs, and evidence schemas may still change.
 
-> Release-candidate note: `Cristian0101/deploytruth@v0` does not exist yet. The example below is
-> future-release syntax. Inside this repository, `uses: ./` exercises the committed candidate
-> bundle today.
-
 ## Usage
 
 ```yaml
@@ -34,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: deploytruth
-        uses: Cristian0101/deploytruth@v0 # pre-1.0; or `uses: ./` inside this repo
+        uses: Cristian0101/deploytruth@v0
         with:
           environment: production
           config: deploytruth.yml # optional; repository-relative
@@ -58,10 +54,11 @@ The Action requires no install step: the shipped entrypoint at
 `packages/github-action/dist/index.js` is a self-contained bundle of the truth engine and its
 runtime dependencies.
 
-Two refs serve the Action: `v0` is the moving pre-1.0 major ref that tracks certified releases,
-and `v0.1.0`-style tags are immutable version pins. Use `@v0` for the normal consumption path;
-pin `@v0.1.0` (or a commit SHA) when a workflow needs an exact, unchanging artifact. See
-[docs/releasing.md](releasing.md) for the release procedure that advances them.
+Two refs serve the Action: `v0` is the moving compatible pre-1.0 ref that tracks certified
+releases, and `v0.1.0`-style tags are immutable version pins. Use `@v0` for the normal
+consumption path; pin `@v0.1.0` (or a commit SHA) when a workflow needs an exact, unchanging
+artifact. Contributors can use `uses: ./` inside this repository. See
+[docs/releasing.md](releasing.md) for the release procedure that advances the moving ref.
 
 ## Inputs
 
