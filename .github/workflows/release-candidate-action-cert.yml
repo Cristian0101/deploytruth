@@ -2,8 +2,8 @@ name: Release Candidate Remote Action Certification
 
 # Isolated release QA only: prove that a consumer can invoke the immutable RC commit through
 # GitHub's remote `uses:` resolution. This harness is not part of the release candidate and must
-# not be merged. It checks out protected main as the application under test so local, deployment,
-# runtime, and database truth all refer to the currently deployed acceptance target.
+# not be merged. It checks out protected main as the application under test and certifies only
+# local Git plus public GitHub source truth, so no repository secrets are exposed to PR code.
 on:
   pull_request:
     branches: [main]
@@ -20,31 +20,39 @@ jobs:
         with:
           ref: main
 
-      - name: Verify pinned Supabase CA
+      - name: Create credential-free consumer manifest
         shell: bash
         run: |
           set -euo pipefail
-          certificate="$GITHUB_WORKSPACE/.github/trust/supabase-root-2021-ca.crt"
-          expected_fingerprint='80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA'
-          test -s "$certificate"
-          ! grep -q -- 'PRIVATE KEY' "$certificate"
-          actual_fingerprint="$(openssl x509 -in "$certificate" -noout -fingerprint -sha256 | cut -d= -f2)"
-          test "$actual_fingerprint" = "$expected_fingerprint"
-          openssl x509 -in "$certificate" -noout -checkend 86400
+          cat > release-candidate-action-cert.yml <<'YAML'
+          version: 1
+          project: deploytruth-remote-action-consumer
+          environments:
+            certification:
+              kind: production
+              source:
+                provider: github
+                repository: Cristian0101/deploytruth
+                branch: main
+              checks:
+                local_git: true
+                remote_source: true
+                deployment_sha: false
+                migrations: false
+                runtime_identity: false
+                environment_isolation: false
+                environment_variables: false
+          YAML
 
       - name: Certify the immutable RC through remote uses
         id: deploytruth
         uses: Cristian0101/deploytruth@80a39424b7523d131c4c4d1b15cc1bbd0e01400c
         with:
-          environment: acceptance
-          config: examples/live-acceptance/deploytruth.yml
+          environment: certification
+          config: release-candidate-action-cert.yml
           fail-on: fail
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOYTRUTH_VERCEL_TOKEN: ${{ secrets.DEPLOYTRUTH_VERCEL_TOKEN }}
-          DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN: ${{ secrets.DEPLOYTRUTH_SUPABASE_ACCESS_TOKEN }}
-          DEPLOYTRUTH_SUPABASE_DATABASE_URL: ${{ secrets.DEPLOYTRUTH_SUPABASE_DATABASE_URL }}
-          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/.github/trust/supabase-root-2021-ca.crt
 
       - name: Verify remote Action outputs
         env:
