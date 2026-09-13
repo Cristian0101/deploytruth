@@ -1,0 +1,43 @@
+name: Provider request
+description: Request a read-only deployment truth integration
+title: '[Provider]: '
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include credentials, customer data, private repository contents, or raw provider
+        payloads. A provider request is an integration proposal, not a roadmap commitment.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or platform
+      placeholder: Example Cloud
+    validations:
+      required: true
+  - type: textarea
+    id: relationship
+    attributes:
+      label: Relationship truth to establish
+      description: What declared-versus-observed mismatch should DeployTruth detect?
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Authoritative read-only evidence
+      description: Which documented read-only API or metadata proves this truth?
+    validations:
+      required: true
+  - type: textarea
+    id: unavailable
+    attributes:
+      label: Unavailable or ambiguous behavior
+      description: When should DeployTruth report UNKNOWN or WARN instead of claiming certainty?
+    validations:
+      required: true
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Public documentation links
+      description: Link to the provider's official API and authentication/scoping documentation.

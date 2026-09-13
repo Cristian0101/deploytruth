@@ -11,6 +11,10 @@ certainty.
 DeployTruth is an early, pre-1.0 open-source release. Interfaces, configuration, and report
 schemas may still change.
 
+> Release-candidate note: the `deploytruth` npm package is not published yet. The install commands
+> below are the intended v0.1 syntax; evaluate the current candidate from the repository source
+> checkout until publication.
+
 ## Install
 
 Requires Node.js 22 or later.
@@ -51,6 +55,8 @@ The same truth engine runs in CI as a self-contained JavaScript Action:
   with:
     environment: production
 ```
+
+The moving `v0` Action ref is also created only during the release phase; it does not resolve yet.
 
 ## License
 

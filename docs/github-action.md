@@ -12,6 +12,10 @@ four surfaces:
 
 DeployTruth is pre-1.0. The Action's inputs, outputs, and evidence schemas may still change.
 
+> Release-candidate note: `Cristian0101/deploytruth@v0` does not exist yet. The example below is
+> future-release syntax. Inside this repository, `uses: ./` exercises the committed candidate
+> bundle today.
+
 ## Usage
 
 ```yaml
