@@ -72,6 +72,21 @@ names the providers already expect: `DEPLOYTRUTH_GITHUB_TOKEN` or the workflow's
 `SUPABASE_ACCESS_TOKEN`), and `DEPLOYTRUTH_SUPABASE_DATABASE_URL`. Scope them to the step — not
 the workflow — and never commit them.
 
+### Verified Supabase CA trust
+
+The maintained acceptance workflow uses the public
+`.github/trust/supabase-root-2021-ca.crt` only for its certification step through
+`NODE_EXTRA_CA_CERTS`. This is an **additional** Node trust anchor; it does not disable normal
+certificate-chain or hostname verification. Before the Action runs, the workflow verifies that
+the file has no private-key block, has the pinned SHA-256 fingerprint
+`80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`,
+and remains valid for at least one day.
+
+Supabase directs users to download the database root certificate from the project's Database
+Settings when using `verify-full` TLS. The committed root is public trust material from that
+source, not a credential. Never replace it with a private key, database URL, password, access
+token, or an insecure TLS override.
+
 ## Outputs
 
 | Output               | Example                                              | Meaning                                |
