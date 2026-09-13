@@ -1,0 +1,122 @@
+name: Release Action Refs QA
+
+# QA-only: this workflow is intentionally dispatched from an unmerged branch so both public
+# Action references are executed in a clean GitHub-hosted runner before announcement.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-v0-1-0:
+    name: Verify v0.1.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write self-contained QA declaration
+        run: |
+          cat > .deploytruth-action-ref-qa.yml <<'EOF'
+          version: 1
+          project: deploytruth-action-ref-qa
+          environments:
+            qa:
+              kind: staging
+              checks:
+                local_git: false
+                remote_source: false
+                deployment_sha: false
+                migrations: false
+                runtime_identity: false
+                environment_isolation: false
+                environment_variables: false
+          EOF
+
+      - name: Execute immutable Action ref
+        id: deploytruth
+        uses: Cristian0101/deploytruth@v0.1.0
+        with:
+          environment: qa
+          config: .deploytruth-action-ref-qa.yml
+          fail-on: fail
+
+      - name: Assert Action outputs
+        env:
+          VERDICT: ${{ steps.deploytruth.outputs.verdict }}
+          RUN_ID: ${{ steps.deploytruth.outputs.run-id }}
+          VERIFIED: ${{ steps.deploytruth.outputs.verified }}
+          WARNINGS: ${{ steps.deploytruth.outputs.warnings }}
+          FAILURES: ${{ steps.deploytruth.outputs.failures }}
+          ARTIFACT_DIR: ${{ steps.deploytruth.outputs.artifact-directory }}
+        run: |
+          test "$VERDICT" = PASS
+          echo "$RUN_ID" | grep -Eq '^[0-9A-HJKMNP-TV-Z]{26}$'
+          for count in "$VERIFIED" "$WARNINGS" "$FAILURES"; do
+            test "$count" = 0
+          done
+          test -d "$ARTIFACT_DIR"
+
+      - name: Upload immutable-ref evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploytruth-action-v0.1.0-${{ steps.deploytruth.outputs.run-id }}
+          path: ${{ steps.deploytruth.outputs.artifact-directory }}
+          if-no-files-found: error
+          retention-days: 14
+
+  compatibility-v0:
+    name: Verify v0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write self-contained QA declaration
+        run: |
+          cat > .deploytruth-action-ref-qa.yml <<'EOF'
+          version: 1
+          project: deploytruth-action-ref-qa
+          environments:
+            qa:
+              kind: staging
+              checks:
+                local_git: false
+                remote_source: false
+                deployment_sha: false
+                migrations: false
+                runtime_identity: false
+                environment_isolation: false
+                environment_variables: false
+          EOF
+
+      - name: Execute moving compatibility Action ref
+        id: deploytruth
+        uses: Cristian0101/deploytruth@v0
+        with:
+          environment: qa
+          config: .deploytruth-action-ref-qa.yml
+          fail-on: fail
+
+      - name: Assert Action outputs
+        env:
+          VERDICT: ${{ steps.deploytruth.outputs.verdict }}
+          RUN_ID: ${{ steps.deploytruth.outputs.run-id }}
+          VERIFIED: ${{ steps.deploytruth.outputs.verified }}
+          WARNINGS: ${{ steps.deploytruth.outputs.warnings }}
+          FAILURES: ${{ steps.deploytruth.outputs.failures }}
+          ARTIFACT_DIR: ${{ steps.deploytruth.outputs.artifact-directory }}
+        run: |
+          test "$VERDICT" = PASS
+          echo "$RUN_ID" | grep -Eq '^[0-9A-HJKMNP-TV-Z]{26}$'
+          for count in "$VERIFIED" "$WARNINGS" "$FAILURES"; do
+            test "$count" = 0
+          done
+          test -d "$ARTIFACT_DIR"
+
+      - name: Upload compatibility-ref evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploytruth-action-v0-${{ steps.deploytruth.outputs.run-id }}
+          path: ${{ steps.deploytruth.outputs.artifact-directory }}
+          if-no-files-found: error
+          retention-days: 14
