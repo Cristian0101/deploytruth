@@ -24,7 +24,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > release-candidate-action-cert.yml <<'YAML'
+          mkdir -p .deploytruth/reports
+          cat > .deploytruth/reports/release-candidate-action-cert.yml <<'YAML'
           version: 1
           project: deploytruth-remote-action-consumer
           environments:
@@ -49,7 +50,7 @@ jobs:
         uses: Cristian0101/deploytruth@80a39424b7523d131c4c4d1b15cc1bbd0e01400c
         with:
           environment: certification
-          config: release-candidate-action-cert.yml
+          config: .deploytruth/reports/release-candidate-action-cert.yml
           fail-on: fail
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
