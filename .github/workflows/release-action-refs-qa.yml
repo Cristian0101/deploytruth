@@ -1,8 +1,10 @@
 name: Release Action Refs QA
 
-# QA-only: this workflow is intentionally dispatched from an unmerged branch so both public
-# Action references are executed in a clean GitHub-hosted runner before announcement.
+# QA-only: this workflow runs only from an unmerged QA branch so both public Action references
+# are executed in a clean GitHub-hosted runner before announcement.
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
