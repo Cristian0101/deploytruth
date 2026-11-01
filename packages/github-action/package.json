@@ -16,6 +16,6 @@
     "@deploytruth/core": "workspace:*",
     "@deploytruth/reporter": "workspace:*",
     "deploytruth": "workspace:*",
-    "zod": "^3.24.1"
+    "zod": "^4.6.6"
   }
 }
